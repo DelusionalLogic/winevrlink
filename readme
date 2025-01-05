@@ -15,6 +15,14 @@ reversing internal Steam components and quite a bit of guesswork. The
 difficulty of running the thing will reflect that. If that catches your
 interest though, it's all here.
 
+Besides the hacks to existing libraries contained in `lib/`, this repository
+contains 3 new components. `dllhost` holds a wrapper for Valve's driver_vrlink
+designed to run inside wine where it connect to a unix domain socket. The other
+half of that domain socket is `native/` which is an openvr driver that creates
+the domain socket on startup and exchanges data with `dllhost` as a cross-wine
+RPC. Finally, `amf/` holds a shim for AMD's AMF to emulate it by using the host
+implementation and dxvk.
+
 Getting steam to advertise support
 ----------------------------------
 
