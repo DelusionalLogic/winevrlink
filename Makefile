@@ -137,8 +137,8 @@ AMFRT_DLLS = \
 			odbccp32
 AMFRT_LIBRARIES = uuid
 AMFRT_LDFLAGS = -g -O0 -ggdb -fno-omit-frame-pointer -fstack-protector -shared -lvulkan -lglfw
-AMFRT_CXXFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -iquote$(SHARED_SRC_DIR) -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector
-AMFRT_CFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -iquote$(SHARED_SRC_DIR) -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fno-short-wchar -lvulkan
+AMFRT_CXXFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector
+AMFRT_CFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fno-short-wchar -lvulkan
 
 $(OBJDIR)/$(AMFRT_SRC_DIR)/%.cpp.o: $(AMFRT_SRC_DIR)/%.cpp
 	@mkdir -p $(@D)

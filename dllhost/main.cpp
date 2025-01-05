@@ -1,13 +1,16 @@
 #include "ipc.h"
 #include <cassert>
 #include <openvr_driver.h>
-#include <iostream>
 #include <windows.h>
 #include <wine/windows/d3d11.h>
 #include <winternl.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <d3d11_4.h>
+
+#include <wine/debug.h>
+
+WINE_DEFAULT_DEBUG_CHANNEL(dllhost);
 
 struct DriverState {
 	Pipe pipe;
@@ -65,15 +68,13 @@ struct shared_resource_info
     UINT64 resource_size;
 };
 
-static inline void init_unicode_string( UNICODE_STRING *str, const WCHAR *data )
-{
+static inline void init_unicode_string( UNICODE_STRING *str, const WCHAR *data ) {
     str->Length = lstrlenW(data) * sizeof(WCHAR);
     str->MaximumLength = str->Length + sizeof(WCHAR);
     str->Buffer = (WCHAR *)data;
 }
 
-static HANDLE open_shared_resource(HANDLE kmt_handle, LPCWSTR name)
-{
+static HANDLE open_shared_resource(HANDLE kmt_handle, LPCWSTR name) {
     static const WCHAR shared_gpu_resourceW[] = {'\\','?','?','\\','S','h','a','r','e','d','G','p','u','R','e','s','o','u','r','c','e',0};
     UNICODE_STRING shared_gpu_resource_us;
     struct shared_resource_open *inbuff;
@@ -92,9 +93,8 @@ static HANDLE open_shared_resource(HANDLE kmt_handle, LPCWSTR name)
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    if ((status = NtCreateFile(&shared_resource, GENERIC_READ | GENERIC_WRITE, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0)))
-    {
-        printf("Failed to load open a shared resource handle, status %#lx.\n", (long int)status);
+    if ((status = NtCreateFile(&shared_resource, GENERIC_READ | GENERIC_WRITE, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0))) {
+        WINE_ERR("Failed to load open a shared resource handle, status %#lx.\n", (long int)status);
         return INVALID_HANDLE_VALUE;
     }
 
@@ -104,21 +104,18 @@ static HANDLE open_shared_resource(HANDLE kmt_handle, LPCWSTR name)
     if (name)
         lstrcpyW(&inbuff->name[0], name);
 
-    status = NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_OPEN,
-            inbuff, in_size, NULL, 0);
+    status = NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_OPEN, inbuff, in_size, NULL, 0);
 
     free(inbuff);
 
-    if (status)
-    {
-        printf("Failed to open video resource, status %#lx.\n", (long int)status);
+    if (status) {
+        WINE_ERR("Failed to open video resource, status %#lx.\n", (long int)status);
         NtClose(shared_resource);
         return INVALID_HANDLE_VALUE;
     }
 
     return shared_resource;
 }
-
 
 #define IOCTL_SHARED_GPU_RESOURCE_GET_UNIX_RESOURCE           CTL_CODE(FILE_DEVICE_VIDEO, 3, METHOD_BUFFERED, FILE_READ_ACCESS)
 #define IOCTL_SHARED_GPU_RESOURCE_GET_DMA_RESOURCE           CTL_CODE(FILE_DEVICE_VIDEO, 8, METHOD_BUFFERED, FILE_READ_ACCESS)
@@ -137,7 +134,7 @@ static int get_shared_resource_fd(HANDLE shared_resource, struct DriverState *st
 
 	DxvkSharedTextureMetadata metadata;
 	getSharedMetadata(shared_resource, &metadata, sizeof(metadata), nullptr);
-	state->pipe.msg("    0x%08X -> %d %d %d %d %d\n", shared_resource, metadata.Width, metadata.Height, metadata.Format, metadata.SampleDesc, metadata.TextureLayout);
+	WINE_TRACE("    0x%08lX -> %d %d %d %d %d\n", (uint64_t)shared_resource, metadata.Width, metadata.Height, metadata.Format, metadata.SampleDesc.Quality, metadata.TextureLayout);
 
 	if (NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_GET_DMA_RESOURCE,
 				NULL, 0, &unix_resource, sizeof(unix_resource)))
@@ -150,8 +147,7 @@ static int get_shared_resource_fd(HANDLE shared_resource, struct DriverState *st
 
 #define STUB() \
 do { \
-	std::cerr << "Unimplemented stub " << __PRETTY_FUNCTION__ << std::endl; \
-	std::flush(std::cerr); \
+	WINE_FIXME("Unimplemented stub %s\n", __PRETTY_FUNCTION__); \
 }while(0)
 
 struct NullObject{
@@ -162,9 +158,7 @@ struct NullObject{
 typedef void* (__attribute__((ms_abi)) *HmdDriverFactoryPtr)(const char*, int*);
 
 __attribute__((noreturn)) MSABI void *uhoh(struct NullObject *obj) {
-	std::cerr << "Uh Oh: " << obj->name << std::endl;
-	std::flush(std::cerr);
-
+	WINE_ERR("FATAL: Unimplemented object called\n");
 	abort();
 }
 
@@ -267,7 +261,7 @@ public:
 };
 
 MSABI vr::EVRInputError VRDriverInput::CreateBooleanComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle ) {
-	state->pipe.msg("call CreateBooleanComponent(%ld, %s, %p)\n", ulContainer, pchName, pHandle);
+	WINE_TRACE("call CreateBooleanComponent(%ld, %s, %p)\n", ulContainer, pchName, pHandle);
 	state->pipe.begin_call(METH_INPUT_CBOOL);
 	state->pipe.send(&objId, sizeof(objId));
 	state->pipe.send(&ulContainer, sizeof(ulContainer));
@@ -282,11 +276,11 @@ MSABI vr::EVRInputError VRDriverInput::CreateBooleanComponent( vr::PropertyConta
 	state->pipe.recv(pHandle, sizeof(*pHandle));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %d, %d\n", ret, *pHandle);
+	WINE_TRACE("ret %d, %ld\n", ret, *pHandle);
 	return ret;
 }
 MSABI vr::EVRInputError VRDriverInput::UpdateBooleanComponent( vr::VRInputComponentHandle_t ulComponent, bool bNewValue, double fTimeOffset ) {
-	state->pipe.msg("call UpdateBooleanComponent(%ld, %d, %lf)\n", ulComponent, bNewValue, fTimeOffset);
+	WINE_TRACE("call UpdateBooleanComponent(%ld, %d, %lf)\n", ulComponent, bNewValue, fTimeOffset);
 	state->pipe.begin_call(METH_INPUT_UBOOL);
 	state->pipe.send(&objId, sizeof(objId));
 	state->pipe.send(&ulComponent, sizeof(ulComponent));
@@ -299,7 +293,7 @@ MSABI vr::EVRInputError VRDriverInput::UpdateBooleanComponent( vr::VRInputCompon
 	state->pipe.recv(&ret, sizeof(ret));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %d\n", ret);
+	WINE_TRACE("ret %d\n", ret);
 	return ret;
 }
 MSABI vr::EVRInputError VRDriverInput::CreateScalarComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle, vr::EVRScalarType eType, vr::EVRScalarUnits eUnits ) {
@@ -338,7 +332,7 @@ public:
 VRMailbox::VRMailbox(struct DriverState *state, uint64_t objId) : state(state), objId(objId) { }
 
 MSABI vr::vrmb_typeb VRMailbox::undoc1(const char *a, vr::vrmb_typea *b, char *c, uint32_t d) {
-	state->pipe.msg("call undoc1(%s, %p, %s, %d)\n", a, b, c, d);
+	WINE_TRACE("call undoc1(%s, %p, %s, %d)\n", a, b, c, d);
 	state->pipe.begin_call(METH_MB_UNDOC1);
 	state->pipe.send(&objId, sizeof(uint64_t));
 	uint64_t alen = strlen(a);
@@ -364,7 +358,7 @@ MSABI vr::vrmb_typeb VRMailbox::undoc3(vr::vrmb_typea a, const char *b, const ch
 	return vr::vrmb_typeb::valueb;
 }
 MSABI vr::vrmb_typeb VRMailbox::undoc4(vr::vrmb_typea a, char *b, uint32_t c, uint32_t *d) {
-	state->pipe.msg("call undoc4(%d, %p, %d, %p)\n", a, b, c, d);
+	WINE_TRACE("call undoc4(%ld, %p, %d, %p)\n", a, b, c, d);
 	state->pipe.begin_call(METH_MB_UNDOC4);
 	state->pipe.send(&objId, sizeof(uint64_t));
 	state->pipe.send(&a, sizeof(uint64_t));
@@ -375,9 +369,9 @@ MSABI vr::vrmb_typeb VRMailbox::undoc4(vr::vrmb_typea a, char *b, uint32_t c, ui
 	vr::vrmb_typeb ret;
 	state->pipe.recv(&ret, sizeof(ret));
 	state->pipe.recv(d, sizeof(uint32_t));
-	state->pipe.msg("undoc4 ret %d %ld\n", ret, c);
+	WINE_TRACE("undoc4 ret %d %d\n", ret, c);
 	state->pipe.recv(b, c);
-	state->pipe.msg("undoc4 ret %p\n", b);
+	WINE_TRACE("undoc4 ret %p\n", b);
 	state->pipe.return_read_channel();
 	return ret;
 }
@@ -397,7 +391,7 @@ public:
 VRPaths::VRPaths(struct DriverState *state, uint64_t objId) : state(state), objId(objId) { }
 
 MSABI vr::ETrackedPropertyError VRPaths::ReadPathBatch(vr::PropertyContainerHandle_t ulRootHandle, vr::PathRead_t * pBatch, uint32_t unBatchEntryCount) {
-	state->pipe.msg("call ReadPathBatch(%d, %p, %d)\n", ulRootHandle, pBatch, unBatchEntryCount);
+	WINE_TRACE("call ReadPathBatch(%ld, %p, %d)\n", ulRootHandle, pBatch, unBatchEntryCount);
 
 	state->pipe.begin_call(METH_PATH_READ);
 	state->pipe.send(&objId, sizeof(objId));
@@ -410,7 +404,7 @@ MSABI vr::ETrackedPropertyError VRPaths::ReadPathBatch(vr::PropertyContainerHand
 		state->pipe.send(&it->ulPath, sizeof(it->ulPath));
 		state->pipe.send(&it->unBufferSize, sizeof(it->unBufferSize));
 		if(it->pszPath != nullptr) {
-			state->pipe.msg("The NULL alsoPath assumption did not hold %s", it->pszPath);
+			WINE_TRACE("The NULL alsoPath assumption did not hold %s", it->pszPath);
 		}
 	}
 
@@ -432,7 +426,7 @@ MSABI vr::ETrackedPropertyError VRPaths::ReadPathBatch(vr::PropertyContainerHand
 	return ret;
 }
 MSABI vr::ETrackedPropertyError VRPaths::WritePathBatch(vr::PropertyContainerHandle_t ulRootHandle, vr::PathWrite_t * pBatch, uint32_t unBatchEntryCount) {
-	state->pipe.msg("call WritePathBatch(%d, %p, %d)\n", ulRootHandle, pBatch, unBatchEntryCount);
+	WINE_TRACE("call WritePathBatch(%ld, %p, %d)\n", ulRootHandle, pBatch, unBatchEntryCount);
 
 	state->pipe.begin_call(METH_PATH_WRITE);
 	state->pipe.send(&objId, sizeof(objId));
@@ -448,7 +442,7 @@ MSABI vr::ETrackedPropertyError VRPaths::WritePathBatch(vr::PropertyContainerHan
 		state->pipe.send(&it->unBufferSize, sizeof(it->unBufferSize));
 		state->pipe.send(it->pvBuffer, it->unBufferSize);
 		if(it->pszPath != nullptr) {
-			state->pipe.msg("The NULL alsoPath assumption did not hold %s", it->pszPath);
+			WINE_TRACE("The NULL alsoPath assumption did not hold %s", it->pszPath);
 		}
 	}
 
@@ -468,7 +462,7 @@ MSABI vr::ETrackedPropertyError VRPaths::WritePathBatch(vr::PropertyContainerHan
 	return ret;
 }
 MSABI vr::ETrackedPropertyError VRPaths::StringToHandle(vr::PathHandle_t * pHandle, char * pchPath) {
-	state->pipe.msg("call StringToHandle(%p, %s)\n", pHandle, pchPath);
+	WINE_TRACE("call StringToHandle(%p, %s)\n", pHandle, pchPath);
 
 	state->pipe.begin_call(METH_PATH_S2H);
 	state->pipe.send(&objId, sizeof(uint64_t));
@@ -514,7 +508,7 @@ class VRServerDriverHost : public vr::IVRServerDriverHost {
 VRServerDriverHost::VRServerDriverHost(struct DriverState *state, uint64_t objId) : state(state), objId(objId) {};
 
 MSABI bool VRServerDriverHost::TrackedDeviceAdded(const char *pchDeviceSerialNumber, vr::ETrackedDeviceClass eDeviceClass, vr::ITrackedDeviceServerDriver *pDriver) {
-	state->pipe.msg("call TrackedDeviceAdded(%s, %d, %p)\n", pchDeviceSerialNumber, eDeviceClass, pDriver);
+	WINE_TRACE("call TrackedDeviceAdded(%s, %d, %p)\n", pchDeviceSerialNumber, eDeviceClass, pDriver);
 
 	state->pipe.begin_call(METH_SERVER_DEVADD);
 	state->pipe.send(&objId, sizeof(size_t));
@@ -530,11 +524,11 @@ MSABI bool VRServerDriverHost::TrackedDeviceAdded(const char *pchDeviceSerialNum
 	state->pipe.recv(&ret, sizeof(ret));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %d\n", ret);
+	WINE_TRACE("ret %d\n", ret);
 	return ret;
 };
 MSABI void VRServerDriverHost::TrackedDevicePoseUpdated(uint32_t unWhichDevice, const vr::DriverPose_t & newPose, uint32_t unPoseStructSize) {
-	state->pipe.msg("call TrackedDevicePoseUpdated(%s, %p, %d)\n", unWhichDevice, newPose, unPoseStructSize);
+	WINE_TRACE("call TrackedDevicePoseUpdated(%d, %p, %d)\n", unWhichDevice, &newPose, unPoseStructSize);
 
 	state->pipe.begin_call(METH_SERVER_POSE);
 	state->pipe.send(&objId, sizeof(objId));
@@ -544,7 +538,7 @@ MSABI void VRServerDriverHost::TrackedDevicePoseUpdated(uint32_t unWhichDevice, 
 	state->pipe.wait_for_return();
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret\n");
+	WINE_TRACE("ret\n");
 }
 MSABI void VRServerDriverHost::VsyncEvent(double vsyncTimeOffsetSeconds) {
 	STUB();
@@ -557,7 +551,7 @@ MSABI bool VRServerDriverHost::IsExiting() {
 	return false;
 }
 MSABI bool VRServerDriverHost::PollNextEvent(vr::VREvent_t *pEvent, uint32_t uncbVREvent) {
-	state->pipe.msg("call PollNextEvent(%p, %d)\n", pEvent, uncbVREvent);
+	WINE_TRACE("call PollNextEvent(%p, %d)\n", pEvent, uncbVREvent);
 
 	state->pipe.begin_call(METH_SERVER_POLL);
 	state->pipe.send(&objId, sizeof(size_t));
@@ -570,7 +564,7 @@ MSABI bool VRServerDriverHost::PollNextEvent(vr::VREvent_t *pEvent, uint32_t unc
 	state->pipe.recv(pEvent, uncbVREvent);
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %d\n", ret);
+	WINE_TRACE("ret %d\n", ret);
 	return ret;
 }
 MSABI void VRServerDriverHost::GetRawTrackedDevicePoses(float fPredictedSecondsFromNow, vr::TrackedDevicePose_t *pTrackedDevicePoseArray, uint32_t unTrackedDevicePoseArrayCount) {
@@ -641,7 +635,7 @@ MSABI void VRSettings::SetString(const char *pchSection, const char *pchSettings
 }
 
 MSABI bool VRSettings::GetBool(const char *pchSection, const char *pchSettingsKey, vr::EVRSettingsError *peError) {
-	state->pipe.msg("call GetBool(%s, %s, %p)\n", pchSection, pchSettingsKey, peError);
+	WINE_TRACE("call GetBool(%s, %s, %p)\n", pchSection, pchSettingsKey, peError);
 
 	if(peError == nullptr) {
 		vr::EVRSettingsError err;
@@ -664,11 +658,11 @@ MSABI bool VRSettings::GetBool(const char *pchSection, const char *pchSettingsKe
 	state->pipe.recv(peError, sizeof(*peError));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %d %d\n", ret, *peError);
+	WINE_TRACE("ret %d %d\n", ret, *peError);
 	return ret;
 }
 MSABI int32_t VRSettings::GetInt32(const char *pchSection, const char *pchSettingsKey, vr::EVRSettingsError *peError) {
-	state->pipe.msg("call GetInt32(%s, %s, %p)\n", pchSection, pchSettingsKey, peError);
+	WINE_TRACE("call GetInt32(%s, %s, %p)\n", pchSection, pchSettingsKey, peError);
 
 	if(peError == nullptr) {
 		vr::EVRSettingsError err;
@@ -691,7 +685,7 @@ MSABI int32_t VRSettings::GetInt32(const char *pchSection, const char *pchSettin
 	state->pipe.recv(peError, sizeof(*peError));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %d %d\n", ret, *peError);
+	WINE_TRACE("ret %d %d\n", ret, *peError);
 	return ret;
 }
 MSABI float VRSettings::GetFloat(const char *pchSection, const char *pchSettingsKey, vr::EVRSettingsError *peError) {
@@ -700,7 +694,7 @@ MSABI float VRSettings::GetFloat(const char *pchSection, const char *pchSettings
 	return 0.0;
 }
 MSABI void VRSettings::GetString(const char *pchSection, const char *pchSettingsKey, VR_OUT_STRING() char *pchValue, uint32_t unValueLen, vr::EVRSettingsError *peError) {
-	state->pipe.msg("call GetString(%s, %s, %p, %d, %p)\n", pchSection, pchSettingsKey, pchValue, unValueLen, peError);
+	WINE_TRACE("call GetString(%s, %s, %p, %d, %p)\n", pchSection, pchSettingsKey, pchValue, unValueLen, peError);
 
 	if(peError == nullptr) {
 		vr::EVRSettingsError err;
@@ -723,7 +717,7 @@ MSABI void VRSettings::GetString(const char *pchSection, const char *pchSettings
 	state->pipe.recv(peError, sizeof(*peError));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %s\n", pchValue);
+	WINE_TRACE("ret %s\n", pchValue);
 	return;
 }
 
@@ -752,7 +746,7 @@ class VRProperties : public vr::IVRProperties {
 VRProperties::VRProperties(struct DriverState *state, uint64_t objId) : state(state), objId(objId) {};
 
 MSABI vr::ETrackedPropertyError VRProperties::ReadPropertyBatch(vr::PropertyContainerHandle_t ulContainerHandle, vr::PropertyRead_t *pBatch, uint32_t unBatchEntryCount) {
-	state->pipe.msg("call ReadPropertyBatch(%d, %p, %d)\n", ulContainerHandle, pBatch, unBatchEntryCount);
+	WINE_TRACE("call ReadPropertyBatch(%ld, %p, %d)\n", ulContainerHandle, pBatch, unBatchEntryCount);
 
 	state->pipe.begin_call(METH_PROP_READ);
 	state->pipe.send(&objId, sizeof(objId));
@@ -773,14 +767,14 @@ MSABI vr::ETrackedPropertyError VRProperties::ReadPropertyBatch(vr::PropertyCont
 	vr::ETrackedPropertyError ret;
 	state->pipe.recv(&ret, sizeof(ret));
 
-	state->pipe.msg("ret %d\n", ret);
+	WINE_TRACE("ret %d\n", ret);
 	for(uint64_t i = 0; i < unBatchEntryCount; i++) {
 		vr::PropertyRead_t *it =  &pBatch[i];
 		state->pipe.recv(&it->unTag, sizeof(it->unTag));
 		state->pipe.recv(it->pvBuffer, it->unBufferSize);
 		state->pipe.recv(&it->unRequiredBufferSize, sizeof(it->unRequiredBufferSize));
 		state->pipe.recv(&it->eError, sizeof(it->eError));
-		state->pipe.msg("    {%d %.*s %d %d}\n", it->unTag, it->unBufferSize, it->pvBuffer, it->unRequiredBufferSize, it->eError);
+		WINE_TRACE("    {%d %.*s %d %d}\n", it->unTag, it->unBufferSize, (char*)it->pvBuffer, it->unRequiredBufferSize, it->eError);
 	}
 
 	state->pipe.return_read_channel();
@@ -788,7 +782,7 @@ MSABI vr::ETrackedPropertyError VRProperties::ReadPropertyBatch(vr::PropertyCont
 	return ret;
 }
 MSABI vr::ETrackedPropertyError VRProperties::WritePropertyBatch(vr::PropertyContainerHandle_t ulContainerHandle, vr::PropertyWrite_t *pBatch, uint32_t unBatchEntryCount) {
-	state->pipe.msg("call WritePropertyBatch(%d, %p, %d)\n", ulContainerHandle, pBatch, unBatchEntryCount);
+	WINE_TRACE("call WritePropertyBatch(%ld, %p, %d)\n", ulContainerHandle, pBatch, unBatchEntryCount);
 
 	state->pipe.begin_call(METH_PROP_WRITE);
 	state->pipe.send(&objId, sizeof(objId));
@@ -826,7 +820,7 @@ MSABI const char *VRProperties::GetPropErrorNameFromEnum(vr::ETrackedPropertyErr
 	return "";
 }
 MSABI vr::PropertyContainerHandle_t VRProperties::TrackedDeviceToPropertyContainer(vr::TrackedDeviceIndex_t nDevice) {
-	state->pipe.msg("call TrackedDeviceToPropertyContainer(%d)\n", nDevice);
+	WINE_TRACE("call TrackedDeviceToPropertyContainer(%d)\n", nDevice);
 
 	state->pipe.begin_call(METH_PROP_TRANS);
 	state->pipe.send(&objId, sizeof(objId));
@@ -855,8 +849,7 @@ class VRDriverLog : public vr::IVRDriverLog {
 VRDriverLog::VRDriverLog(struct DriverState *state, uint64_t objId) : state(state), objId(objId) {};
 
 MSABI void VRDriverLog::Log(const char *pchLogMessage) {
-	std::cerr << "Log: " << pchLogMessage << std::endl;
-	STUB();
+	WINE_FIXME("Direct log: %s\n", pchLogMessage);
 }
 
 class VRDriverManager : public vr::IVRDriverManager {
@@ -905,7 +898,7 @@ class VRResources : public vr::IVRResources {
 VRResources::VRResources(struct DriverState *state, uint64_t objId) : state(state), objId(objId) { }
 
 MSABI uint32_t VRResources::LoadSharedResource(const char *pchResourceName, char *pchBuffer, uint32_t unBufferLen) {
-	state->pipe.msg("call LoadSharedResource(%s, %p, %d)\n", pchResourceName, pchBuffer, unBufferLen);
+	WINE_TRACE("call LoadSharedResource(%s, %p, %d)\n", pchResourceName, pchBuffer, unBufferLen);
 
 	state->pipe.begin_call(METH_RES_LOAD);
 	state->pipe.send(&objId, sizeof(size_t));
@@ -921,11 +914,11 @@ MSABI uint32_t VRResources::LoadSharedResource(const char *pchResourceName, char
 	state->pipe.recv(pchBuffer, min(ret, unBufferLen));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %.*s, %d\n", min(ret, unBufferLen), pchBuffer, ret);
+	WINE_TRACE("ret %.*s, %d\n", min(ret, unBufferLen), pchBuffer, ret);
 	return ret;
 }
 MSABI uint32_t VRResources::GetResourceFullPath(const char *pchResourceName, const char *pchResourceTypeDirectory, char *pchPathBuffer, uint32_t unBufferLen) {
-	state->pipe.msg("call GetResourceFullPath(%s, %s, %p, %d)\n", pchResourceName, pchResourceTypeDirectory, pchPathBuffer, unBufferLen);
+	WINE_TRACE("call GetResourceFullPath(%s, %s, %p, %d)\n", pchResourceName, pchResourceTypeDirectory, pchPathBuffer, unBufferLen);
 
 	state->pipe.begin_call(METH_RES_PATH);
 	state->pipe.send(&this->objId, sizeof(uint64_t));
@@ -950,7 +943,7 @@ MSABI uint32_t VRResources::GetResourceFullPath(const char *pchResourceName, con
 	state->pipe.recv(pchPathBuffer, min(ret, unBufferLen));
 	state->pipe.return_read_channel();
 
-	state->pipe.msg("ret %.*s, %d\n", min(ret, unBufferLen), pchPathBuffer, ret);
+	WINE_TRACE("ret %.*s, %d\n", min(ret, unBufferLen), pchPathBuffer, ret);
 	return ret;
 }
 
@@ -969,7 +962,7 @@ VRServerConnector::VRServerConnector(struct DriverState *state, uint64_t objId) 
 };
 
 MSABI void *VRServerConnector::GetGenericInterface( const char *pchInterfaceVersion, vr::EVRInitError *peError) {
-	std::cout << "Load interface: " << pchInterfaceVersion << ", arg2: " << (void*) peError << std::endl;
+	WINE_TRACE("Call GetGenericInterface(%s, %p)", pchInterfaceVersion, peError);
 
 	state->pipe.begin_call(METH_GET_INTERFACE);
 	state->pipe.send(&objId, sizeof(size_t));
@@ -1002,77 +995,39 @@ MSABI void *VRServerConnector::GetGenericInterface( const char *pchInterfaceVers
 		*peError =  vr::EVRInitError::VRInitError_None;
 	}
 	if(strcmp(pchInterfaceVersion, vr::IVRServerDriverHost_Version) == 0) {
-		std::cout << "Create and return a VRServerDriverHost" << std::endl;
 		return new VRServerDriverHost(state, objId);
 	} else if(strcmp(pchInterfaceVersion, vr::IVRSettings_Version) == 0) {
-		std::cout << "Create and return a VRSettings" << std::endl;
 		return new VRSettings(state, objId);
 	} else if(strcmp(pchInterfaceVersion, vr::IVRProperties_Version) == 0) {
-		std::cout << "Create and return a VRProperties" << std::endl;
 		return new VRProperties(state, objId);
 	} else if(strcmp(pchInterfaceVersion, vr::IVRDriverLog_Version) == 0) {
-		std::cout << "Create and return a VRDriverLog" << std::endl;
 		return new VRDriverLog(state, objId);
 	} else if(strcmp(pchInterfaceVersion, vr::IVRDriverManager_Version) == 0) {
-		std::cout << "Create and return a VRDriverManager" << std::endl;
 		return new VRDriverManager(state, objId);
 	} else if(strcmp(pchInterfaceVersion, vr::IVRResources_Version) == 0) {
-		std::cout << "Create and return a VRResources" << std::endl;
 		return new VRResources(state, objId);
 	} else if(strcmp(pchInterfaceVersion, vr::IVRDriverInput_Version) == 0) {
-		std::cout << "Create and return a VRDriverInput" << std::endl;
 		return new VRDriverInput(state, objId);
-	/* } else if(strcmp(pchInterfaceVersion, "IVRRenderModels_006") == 0) { */
-	/* 	std::cout << "Create and return a VRRenderModels" << std::endl; */
-	/* 	return new VRResources(state, objId); */
-	/* } else if(strcmp(pchInterfaceVersion, "IVRRenderModelsInternal_XXX") == 0) { */
-	/* 	std::cout << "Create and return a VRRenderModelsInternal" << std::endl; */
-	/* 	return new VRResources(state, objId); */
-	/* } else if(strcmp(pchInterfaceVersion, "IVRSettingsInternal_001") == 0) { */
-	/* 	std::cout << "Create and return a VRSettingsInternal" << std::endl; */
-	/* 	return new VRResources(state, objId); */
 	} else if(strcmp(pchInterfaceVersion, "IVRPaths_001") == 0) {
-		std::cout << "Create and return a VRPaths" << std::endl;
 		return new VRPaths(state, objId);
-	/* } else if(strcmp(pchInterfaceVersion, "IVRPathsInternal_001") == 0) { */
-	/* 	std::cout << "Create and return a VRPathsInternal" << std::endl; */
-	/* 	return new VRResources(state, objId); */
-	/* } else if(strcmp(pchInterfaceVersion, "IVRPropertiesInternal_001") == 0) { */
-	/* 	std::cout << "Create and return a VRPropertiesInternal" << std::endl; */
-	/* 	return new VRResources(state, objId); */
 	} else if(strcmp(pchInterfaceVersion, "IVRServer_XXX") == 0) {
 		// This looks like it's used for some telemetry stuff.
 		// I can't find the interface anywhere, but returning null looks to disable it
 		return nullptr;
-	/* } else if(strcmp(pchInterfaceVersion, "IVRSystemLayerInternal") == 0) { */
-	/* 	std::cout << "Create and return a VRSystemLayerInternal" << std::endl; */
-	/* 	return new VRResources(state, objId); */
-	/* } else if(strcmp(pchInterfaceVersion, "IVRClientInternal_XXX") == 0) { */
-	/* 	std::cout << "Create and return a VRClientInternal" << std::endl; */
-	/* 	return new VRResources(state, objId); */
-	/* } else if(strcmp(pchInterfaceVersion, "IVRCompositorSystemInternal_001") == 0) { */
-	/* 	std::cout << "Create and return a VRCompositorSystemInternal" << std::endl; */
-	/* 	return new VRResources(state, objId); */
-	/* } else if(strcmp(pchInterfaceVersion, "IVRInput_010") == 0) { */
-	/* 	std::cout << "Create and return a VRInput" << std::endl; */
-	/* 	return new VRResources(state, objId); */
 	} else if(strcmp(pchInterfaceVersion, vr::IVRMailbox_Version) == 0) {
-		std::cout << "Create and return a VRMailbox" << std::endl;
 		return new VRMailbox(state, objId);
 	}
 	
-	if(peError != nullptr) {
-		/* *peError =  vr::EVRInitError::VRInitError_Init_InterfaceNotFound; */
-		*peError =  vr::EVRInitError::VRInitError_None;
-	}
 	// Instead of returning and error, we hide behind returning a pointer
 	// that will crash if any of the virtual methods are ever accessed
-	std::cerr << "Returning a null area pointer" << std::endl;
+	WINE_FIXME("Returning fake non-null object for %s\n", pchInterfaceVersion);
+	if(peError != nullptr) {
+		*peError =  vr::EVRInitError::VRInitError_None;
+	}
 	return new NullObject {
 		.vtable = &nullspot,
 		.name = strdup(pchInterfaceVersion),
 	};
-	/* return nullptr; */
 }
 vr::DriverHandle_t VRServerConnector::GetDriverHandle() {
 	STUB();
@@ -1085,21 +1040,19 @@ static void handler(enum PipeMethod m, void *state_) {
 	case METH_DRIVER_FACTORY: {
 		size_t nameLen;
 		state->pipe.recv(&nameLen, sizeof(size_t));
-		state->pipe.msg("Arg is %ld long\n", nameLen);
 		char *buf = (char*)malloc(nameLen + 1);
 		state->pipe.recv(buf, nameLen);
 		size_t taskId = state->pipe.complete_reading_args();
 
 		buf[nameLen] = '\0';
-		std::cerr << "buffer " << nameLen << " content: " << buf << "\n";
 
 		HmdDriverFactoryPtr driverFactory = (HmdDriverFactoryPtr)GetProcAddress(state->hDLL, "HmdDriverFactory");
 		if(driverFactory == NULL) {
-			state->pipe.msg("Driver factory failed to load");
+			WINE_TRACE("Driver factory failed to load");
 		}
 		int rc = 0;
 		vr::IServerTrackedDeviceProvider* driver = (vr::IServerTrackedDeviceProvider*)driverFactory(buf, &rc);
-			std::cout << "Return Code: " << rc << std::endl;
+			WINE_TRACE("Return Code: %d\n", rc);
 
 		uint64_t nextId = 0;
 		if(driver != nullptr) {
@@ -1110,6 +1063,8 @@ static void handler(enum PipeMethod m, void *state_) {
 		state->pipe.return_from_call(taskId);
 		state->pipe.send(&nextId, sizeof(uint64_t));
 		state->pipe.send(&rc, sizeof(int));
+
+		free(buf);
 		break;
 	}
 	case METH_DRIVER_INIT: {
@@ -1125,7 +1080,7 @@ static void handler(enum PipeMethod m, void *state_) {
 		VRServerConnector *connector = new VRServerConnector(state, contextObjId);
 		vr::EVRInitError err = driver->Init(connector);
 		if(err != vr::EVRInitError::VRInitError_None) {
-			std::cerr << "Driver Init Error: " << err << std::endl;
+			WINE_ERR("Driver Init Error: %d", err);
 		}
 		state->pipe.return_from_call(taskId);
 		state->pipe.send(&err, sizeof(vr::EVRInitError));
@@ -1160,12 +1115,13 @@ static void handler(enum PipeMethod m, void *state_) {
 		name[nameLen] = '\0';
 		size_t taskId = state->pipe.complete_reading_args();
 
-		state->pipe.msg("Calling getcomponent with %s\n", name);
+		WINE_TRACE("Calling getcomponent with %s\n", name);
 		void *ret = thisObj->GetComponent(name);
-		state->pipe.msg("Ret from getcomponent %p\n", ret);
+		WINE_TRACE("Ret from getcomponent %p\n", ret);
 
 		state->pipe.return_from_call(taskId);
 		state->pipe.send_new_obj(ret);
+		free(name);
 		break;
 	}
 	case METH_COMP_WINSIZE: {
@@ -1302,7 +1258,7 @@ static void handler(enum PipeMethod m, void *state_) {
 		break;
 	}
 	case METH_DIRECT_CSWAP: {
-		state->pipe.msg("CSWAP\n");
+		WINE_TRACE("CSWAP\n");
 		size_t thisHandle;
 		state->pipe.recv(&thisHandle, sizeof(uint64_t));
 		assert(thisHandle != 0);
@@ -1312,28 +1268,28 @@ static void handler(enum PipeMethod m, void *state_) {
 		state->pipe.recv(&pid, sizeof(pid));
 		vr::IVRDriverDirectModeComponent::SwapTextureSetDesc_t textureDesc;
 		state->pipe.recv(&textureDesc, sizeof(textureDesc));
-		state->pipe.msg("%d %d %d %d\n", textureDesc.nWidth, textureDesc.nHeight, textureDesc.nFormat, textureDesc.nSampleCount);
+		WINE_TRACE("%d %d %d %d\n", textureDesc.nWidth, textureDesc.nHeight, textureDesc.nFormat, textureDesc.nSampleCount);
 
 		size_t taskId = state->pipe.complete_reading_args();
 
 		vr::IVRDriverDirectModeComponent::SwapTextureSet_t texture;
 		thisObj->CreateSwapTextureSet(pid, &textureDesc, &texture);
 
-		state->pipe.msg("Converting HANDLEs to fds\n");
+		WINE_TRACE("Converting HANDLEs to fds\n");
 		int linuxHandles[3];
 		for(uint8_t i = 0; i < 3; i++) {
 			HANDLE handle = (HANDLE)texture.rSharedTextureHandles[i];
 
 			int fd;
 			fd = get_shared_resource_fd(handle, state);
-			state->pipe.msg("    0x%08X -> 0x%08X\n", handle, fd);
+			WINE_TRACE("    0x%08lX -> 0x%08X\n", (uint64_t)handle, fd);
 			/* wine_server_handle_to_fd(handle, FILE_READ_DATA, &fd, NULL); */
 			linuxHandles[i] = fd;
 		}
 
 		state->pipe.return_from_call(taskId);
 		state->pipe.send(&texture.unTextureFlags, sizeof(texture.unTextureFlags));
-		state->pipe.msg("Sending fds\n");
+		WINE_TRACE("Sending fds\n");
 		state->pipe.send_fd(linuxHandles[0]);
 		state->pipe.send_fd(linuxHandles[1]);
 		state->pipe.send_fd(linuxHandles[2]);
@@ -1444,13 +1400,13 @@ static void handler(enum PipeMethod m, void *state_) {
 		size_t taskId = state->pipe.complete_reading_args();
 
 		thisObj->RunFrame();
-		state->pipe.msg("Frames done!\n");
+		WINE_TRACE("Frames done!\n");
 
 		state->pipe.return_from_call(taskId);
 		break;
 	}
 	default:
-		state->pipe.msg("Unhandled Method: %s\n", m);
+		WINE_TRACE("Unhandled Method: %c\n", m);
 		abort();
 	}
 }
@@ -1477,7 +1433,7 @@ void * TrampolineHook(char* src, char* dst, int len) {
 
 extern "C" int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hInstPrev, PSTR cmdline, int cmdshow) {
 	const char* driver_path = "/home/delusional/.local/share/Steam/ubuntu12_32/steamapps/content/app_17770/depot_250821/drivers/vrlink/bin/win64/driver_vrlink.dll";
-	std::cerr << "Loading real vrlink driver: " << driver_path << std::endl;
+	WINE_TRACE("Loading real vrlink driver: %s\n", driver_path);
 
 	HMODULE hDLL = LoadLibraryA(driver_path);
 
@@ -1486,22 +1442,9 @@ extern "C" int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hInstPrev, PSTR cmdli
 		.hDLL = hDLL,
 	};
 	struct DriverState *state = &state_;
-	DIR *dir = opendir("/tmp/");
-
-	if (dir == NULL) {
-		perror("opendir");
-		return 1;
-	}
-
-	struct dirent *entry;
-	while ((entry = readdir(dir)) != NULL) {
-		std::cout << entry->d_name << "\n";
-	}
-
-	closedir(dir);
 
 	if(state->hDLL == NULL) {
-		std::cerr << "DLL Load Failed: " << GetLastError() << std::endl;
+		WINE_ERR("DLL Load Failed: %d\n", GetLastError());
 		return 1;
 	}
 

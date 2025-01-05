@@ -10,16 +10,6 @@
 
 #define FOURCC(code) {(char)(code), (char)(code >> 8), (char)(code >> 16), (char)(code >> 24)}
 
-#if defined(_WIN32)
-#define HMD_DLL_EXPORT extern "C" __declspec( dllexport )
-#define HMD_DLL_IMPORT extern "C" __declspec( dllimport )
-#elif defined(__GNUC__) || defined(COMPILER_GCC) || defined(__APPLE__)
-#define HMD_DLL_EXPORT extern "C" __attribute__((visibility("default")))
-#define HMD_DLL_IMPORT extern "C" 
-#else
-#error "Unsupported Platform."
-#endif
-
 #define STUB(pipe) \
 do { \
 	pipe.msg("Unimplemented stub %s\n", __PRETTY_FUNCTION__); \
@@ -515,6 +505,8 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.return_from_call(taskId);
 		global_pipe.send_new_obj(obj);
 		global_pipe.send(&err, sizeof(vr::EVRInitError));
+
+		free(buf);
 		break;
 	}
 	case METH_RES_LOAD: {
@@ -538,6 +530,9 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.return_from_call(taskId);
 		global_pipe.send(&ret, sizeof(uint32_t));
 		global_pipe.send(buf, ret);
+
+		free(name);
+		free(buf);
 		break;
 	}
 	case METH_RES_PATH: {
@@ -570,6 +565,9 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.return_from_call(taskId);
 		global_pipe.send(&ret, sizeof(uint32_t));
 		global_pipe.send(buf, std::min(ret, bufLen));
+		
+		free(name);
+		free(buf);
 		break;
 	}
 	case METH_SETS_GBOOL: {
@@ -893,6 +891,8 @@ static void handler(enum PipeMethod m, void *userdata) {
 
 		global_pipe.return_from_call(taskId);
 		global_pipe.send(&ret, sizeof(ret));
+
+		free(serial);
 		break;
 	}
 	case METH_INPUT_CBOOL: {
@@ -916,6 +916,8 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.return_from_call(taskId);
 		global_pipe.send(&ret, sizeof(ret));
 		global_pipe.send(&handle, sizeof(handle));
+
+		free(name);
 		break;
 	}
 	case METH_INPUT_UBOOL: {
@@ -961,6 +963,9 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.send(&ret, sizeof(ret));
 		global_pipe.send(&outVal, sizeof(outVal));
 		global_pipe.send(c, csize);
+
+		free(buf);
+		free(c);
 		break;
 	}
 	case METH_MB_UNDOC4: {
@@ -984,6 +989,8 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.send(&ret, sizeof(ret));
 		global_pipe.send(&outSize, sizeof(outSize));
 		global_pipe.send(buf, bufSize);
+
+		free(buf);
 		break;
 	}
 	case METH_SERVER_POSE: {
@@ -1020,6 +1027,8 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.return_from_call(taskId);
 		global_pipe.send(&ret, sizeof(ret));
 		global_pipe.send(&buf, eventSize);
+
+		free(buf);
 		break;
 	}
 	default: {
@@ -1037,7 +1046,7 @@ void taskHandler() {
 }
 
 std::mutex global_lock;
-HMD_DLL_EXPORT void* HmdDriverFactory(const char* pInterfaceName, int* pReturnCode) {
+extern "C" __attribute__((visibility("default"))) void* HmdDriverFactory(const char* pInterfaceName, int* pReturnCode) {
 	{
 		std::unique_lock lock(global_lock);
 		if(global_pipe.log == nullptr) {
