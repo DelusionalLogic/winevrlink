@@ -1,0 +1,38 @@
+VRLink for Linux
+================
+
+An attempt to get the windows version of wireless steam vrlink to work on
+linux.
+
+So far this is a prototype and a horrible hackjob, utilizing multiple
+unsupported and un-upstreamable patches in dxvk and wine. It's also
+unoptimized, and weird. What it does have going for it is that it works. Using
+this you can wirelessly open the SteamVR home from the official SteamVR app for
+Oculus, at a glorious 2 frames per second.
+
+As mentioned, this is a major hackjob, involving close to 100 hours of
+reversing internal Steam components and quite a bit of guesswork. The
+difficulty of running the thing will reflect that. If that catches your
+interest though, it's all here.
+
+Getting steam to advertise support
+----------------------------------
+
+Steam is hardcoded to not advertise support for wireless vr on linux. Without
+that support you cannot select the PC from the headset. The only way I've found
+work around this is to set the memory directly, and even that involves some
+work. You'll have to disassemble the current version of linux32/steamclient.so,
+and look for the string `%s%cpublic%csteamvr_action_manifest.json`. Looking at
+the references to that string should reveal 2 unique methods, we're interested
+in the one that DOES NOT include the string `VRManager()` near the end. This
+method, the one that doesn't reference `VRManager()`, initializes the structure
+that contains the flag for wireless vr. There'll be a procedure taking a single
+static integer argument on the stack (currently 0x180), this is a malloc. After
+that there's the constructor for the class we care about. You'll want to place
+a breakpoint directly after that call returns and poke a `1` into the final
+dword of that object (currently $edi+0x178). Steam should now advertise support
+for wireless vr.
+
+The command for starting steam with a debugger attached is
+
+    DEBUGGER="gdb" $HOME/.steam/steam/steam.sh
