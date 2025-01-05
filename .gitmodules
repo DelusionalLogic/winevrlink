@@ -1,0 +1,3 @@
+[submodule "lib/dxvk"]
+	path = lib/dxvk
+	url = https://github.com/DelusionalLogic/dxvk.git
