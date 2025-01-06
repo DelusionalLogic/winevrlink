@@ -1,3 +1,11 @@
 [submodule "lib/dxvk"]
 	path = lib/dxvk
 	url = https://github.com/DelusionalLogic/dxvk.git
+
+[submodule "lib/wine"]
+	path = lib/wine
+	url = https://github.com/DelusionalLogic/wine.git
+
+[submodule "lib/openvr"]
+	path = lib/openvr
+	url = https://github.com/DelusionalLogic/openvr.git
