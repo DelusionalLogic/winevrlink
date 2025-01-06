@@ -90,7 +90,7 @@ WINE_CXX = wineg++
 WINE_CC = winegcc
 
 HOST_SRC_DIR := dllhost
-HOST_CPP_SRC=$(wildcard $(HOST_SRC_DIR)/*.cpp)
+HOST_CPP_SRC=$(wildcard $(HOST_SRC_DIR)/*.cpp) lib/tracy/public/TracyClient.cpp
 HOST_CPP_OBJ=$(patsubst %,$(OBJDIR)/%.o, $(HOST_CPP_SRC)) ${SHARED_CPP_OBJ:%=$(OBJDIR)/$(HOST_SRC_DIR)/%}
 -include ${HOST_CPP_OBJ:.o=.d}
 
@@ -102,8 +102,12 @@ HOST_DLLS = \
 			odbccp32
 HOST_LIBRARIES = uuid
 HOST_LDFLAGS = -g -O0 -ggdb -fno-omit-frame-pointer -fstack-protector
-HOST_CXXFLAGS = -O0 -g -ggdb -I$(HOST_SRC_DIR) -MMD -iquote$(SHARED_SRC_DIR) -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fpcc-struct-return
+HOST_CXXFLAGS = -O0 -g -ggdb -I$(HOST_SRC_DIR) -MMD -iquote$(SHARED_SRC_DIR) -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fpcc-struct-return -I/lib/tracy/public -DTRACY_ENABLE=1
 HOST_WIN_CXXFLAGS = -mno-cygwin -fstack-protector
+
+$(OBJDIR)/lib/tracy/public/%.cpp.o: lib/tracy/public/%.cpp
+	@mkdir -p $(@D)
+	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
 $(OBJDIR)/$(HOST_SRC_DIR)/%.win.cpp.o: $(HOST_SRC_DIR)/%.win.cpp
 	@mkdir -p $(@D)
