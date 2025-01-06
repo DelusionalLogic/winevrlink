@@ -2,7 +2,6 @@ OBJDIR := obj
 SHARED_SRC_DIR := shared
 SHARED_CPP_SRC := $(wildcard $(SHARED_SRC_DIR)/*.cpp)
 SHARED_CPP_OBJ := $(patsubst %,%.o, $(SHARED_CPP_SRC))
-SHARED_CPP_OBJ_32 := $(patsubst %.o,%.32.o, $(SHARED_CPP_OBJ))
 
 print-%  : ; @echo $* = $($*)
 
@@ -16,11 +15,9 @@ RESDIR := vrdriver
 DRIVER_SRC_DIR := native
 DRIVER_CPP_SRC=$(wildcard $(DRIVER_SRC_DIR)/*.cpp)
 DRIVER_CPP_OBJ=$(patsubst %,$(OBJDIR)/%.o, $(DRIVER_CPP_SRC)) ${SHARED_CPP_OBJ:%=$(OBJDIR)/$(DRIVER_SRC_DIR)/%}
-DRIVER_CPP_OBJ_32=$(patsubst %,$(OBJDIR)/%.32.o, $(DRIVER_CPP_SRC)) ${SHARED_CPP_OBJ_32:%=$(OBJDIR)/$(DRIVER_SRC_DIR)/%}
 -include ${DRIVER_CPP_OBJ:.o=.d}
 
 DRIVER_SO=$(OBJDIR)/vrdriver/bin/linux64/driver_vrdriver.so
-DRIVER_SO_32=$(OBJDIR)/vrdriver/bin/linux32/driver_vrdriver.so
 
 CXXFLAGS := -g -O0 -ggdb -MMD -DLINUX -DPOSIX -Ddriver_vrdriver_EXPORTS -fstack-protector-all \
 	-I/home/delusional/Documents/vrdriver/vrdriver/lib/openvr/headers \
@@ -33,10 +30,6 @@ $(DRIVER_SO): $(DRIVER_CPP_OBJ) $(OBJDIR)/util/utils/driverlog/libutil_driverlog
 	@mkdir -p $(@D)
 	$(CXX) $(LDFLAGS) $^ -o $@
 
-$(DRIVER_SO_32): $(DRIVER_CPP_OBJ_32) $(OBJDIR)/util.32/utils/driverlog/libutil_driverlog.a lib/openvr/bin/linux32/libopenvr_api.a
-	@mkdir -p $(@D)
-	$(CXX) $(LDFLAGS) -m32 $^ -o $@
-
 $(OBJDIR)/vrdriver/: $(RESDIR)
 	@mkdir -p $(@D)
 	cp -r $</* $@
@@ -45,17 +38,9 @@ $(OBJDIR)/$(DRIVER_SRC_DIR)/%.cpp.o: $(DRIVER_SRC_DIR)/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -fPIC -MD -o $@ -c $<
 
-$(OBJDIR)/$(DRIVER_SRC_DIR)/%.cpp.32.o: $(DRIVER_SRC_DIR)/%.cpp
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -fPIC -m32 -MD -o $@ -c $<
-
 $(OBJDIR)/$(DRIVER_SRC_DIR)/$(SHARED_SRC_DIR)/%.cpp.o: $(SHARED_SRC_DIR)/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -fPIC -MD -o $@ -c $<
-
-$(OBJDIR)/$(DRIVER_SRC_DIR)/$(SHARED_SRC_DIR)/%.cpp.32.o: $(SHARED_SRC_DIR)/%.cpp
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -fPIC -m32 -MD -o $@ -c $<
 
 # Build the driverlog utility
 $(OBJDIR)/util/Makefile:
@@ -64,12 +49,6 @@ $(OBJDIR)/util/Makefile:
 $(OBJDIR)/util/utils/driverlog/libutil_driverlog.a: $(OBJDIR)/util/Makefile
 	$(MAKE) -C $(OBJDIR)/util util_driverlog
 
-$(OBJDIR)/util.32/Makefile:
-	@mkdir -p $(@D)
-	cmake -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32 -fPIC" -B $(@D) lib/openvr/samples/drivers
-$(OBJDIR)/util.32/utils/driverlog/libutil_driverlog.a: $(OBJDIR)/util.32/Makefile
-	$(MAKE) -C $(OBJDIR)/util.32 util_driverlog
-
 # Compile the openvr_api.a library
 $(OBJDIR)/openvr/Makefile:
 	@mkdir -p $(@D)
@@ -77,13 +56,6 @@ $(OBJDIR)/openvr/Makefile:
 # Fucking thing can't compile out of the source tree SMH
 lib/openvr/bin/linux64/libopenvr_api.a: $(OBJDIR)/openvr/Makefile
 	$(MAKE) -C $(OBJDIR)/openvr openvr_api
-
-$(OBJDIR)/openvr.32/Makefile:
-	@mkdir -p $(@D)
-	cmake -DCMAKE_CXX_FLAGS="-m32" -DCMAKE_C_FLAGS="-m32" -B $(@D) lib/openvr
-# Fucking thing can't compile out of the source tree SMH
-lib/openvr/bin/linux32/libopenvr_api.a: $(OBJDIR)/openvr.32/Makefile
-	$(MAKE) -C $(OBJDIR)/openvr.32 openvr_api
 
 # The wine host process
 WINE_CXX = wineg++
