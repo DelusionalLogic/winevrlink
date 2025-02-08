@@ -26,21 +26,9 @@ implementation and dxvk.
 Getting steam to advertise support
 ----------------------------------
 
-Steam is hardcoded to not advertise support for wireless vr on linux. Without
-that support you cannot select the PC from the headset. The only way I've found
-work around this is to set the memory directly, and even that involves some
-work. You'll have to disassemble the current version of linux32/steamclient.so,
-and look for the string `%s%cpublic%csteamvr_action_manifest.json`. Looking at
-the references to that string should reveal 2 unique methods, we're interested
-in the one that DOES NOT include the string `VRManager()` near the end. This
-method, the one that doesn't reference `VRManager()`, initializes the structure
-that contains the flag for wireless vr. There'll be a procedure taking a single
-static integer argument on the stack (currently 0x180), this is a malloc. After
-that there's the constructor for the class we care about. You'll want to place
-a breakpoint directly after that call returns and poke a `1` into the final
-dword of that object (currently $edi+0x178). Steam should now advertise support
-for wireless vr.
+Valve has kindly exposed a commandline option to make steam advertise remote vr
+capabilities on linux, even though they don't currently support it themselves.
 
-The command for starting steam with a debugger attached is
+`steam -vrlinkforceenable`
 
-    DEBUGGER="gdb" $HOME/.steam/steam/steam.sh
+Thanks Valve :)
