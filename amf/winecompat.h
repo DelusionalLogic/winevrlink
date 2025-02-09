@@ -12,6 +12,7 @@ void* wine_unwrap_phys_dev(void* handle);
 void* wine_unwrap_instance(void* handle);
 void* wine_unwrap_device(void* handle);
 void* wine_unwrap_dev_mem(void* handle);
+void* wine_unwrap_queue(void* handle);
 
 #ifdef __cplusplus
 }

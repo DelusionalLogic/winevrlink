@@ -206,6 +206,6 @@ $action d3d9
 $action d3d10core
 $action d3d11
 
-rm -v "$win64_sys_path/amfrt64"
+rm -v "$win64_sys_path/amfrt64.dll"
 $file_cmd "$basedir/obj/amfrt64.dll.so" "$win64_sys_path/amfrt64.dll"
 overrideDll "amfrt64"

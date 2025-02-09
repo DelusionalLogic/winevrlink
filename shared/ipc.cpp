@@ -1,5 +1,7 @@
 #include "ipc.h"
 
+#include "log.h"
+
 #include <cassert>
 #include <cerrno>
 #include <cstdarg>
@@ -84,50 +86,50 @@ void Pipe::_reinit(bool crossover, Handler handler) {
 		std::flush(std::cerr);
 		abort();
 	}
-	msg("Hello from driver %d\n", getpid());
+	LOG(msg, "Hello from driver %d\n", getpid());
 
 	if(mkfifo("/tmp/vrlink/forward", 0777) != 0) {
-		msg("Failed to create forward file");
+		LOG(msg, "Failed to create forward file");
 		abort();
 	}
 	if(mkfifo("/tmp/vrlink/backward", 0777) != 0) {
-		msg("Failed to create backward file");
+		LOG(msg, "Failed to create backward file");
 		abort();
 	}
-	msg("Created fifos\n");
+	LOG(msg, "Created fifos\n");
 
 	int sock;
 	struct sockaddr_un addr = {0};
-	msg("Sock\n");
-	msg("Creating socket?\n");
+	LOG(msg, "Sock\n");
+	LOG(msg, "Creating socket?\n");
 	sock = socket(AF_UNIX, SOCK_STREAM, 0);
-	msg("Creating socket?\n");
+	LOG(msg, "Creating socket?\n");
 	assert(sock != -1);
 	addr.sun_family = AF_UNIX;
 	strcpy(addr.sun_path, "/tmp/vrlink/sock");
 	int rc;
-	msg("Bind\n");
+	LOG(msg, "Bind\n");
 	rc = bind(sock, (struct sockaddr*)&addr, sizeof(addr));
 	if(rc == -1) {
-		msg("Failed to bind\n");
+		LOG(msg, "Failed to bind\n");
 		perror("Bind failed");
 	}
 	assert(rc == 0);
-	msg("Listen\n");
+	LOG(msg, "Listen\n");
 	rc = listen(sock, 1);
 	if(rc == -1) {
-		msg("Failed to listen\n");
+		LOG(msg, "Failed to listen\n");
 		perror("Accept failed");
 	}
 	assert(rc == 0);
-	msg("Accept\n");
+	LOG(msg, "Accept\n");
 	int sock_conn = accept(sock, NULL, NULL);
 	if(sock_conn == -1) {
-		msg("Failed to accept\n");
+		LOG(msg, "Failed to accept\n");
 		perror("Accept failed");
 	}
 	assert(sock_conn > 0);
-	msg("Connection!\n");
+	LOG(msg, "Connection!\n");
 
 	write = fdopen(sock_conn, "w");
 	read = fdopen(sock_conn, "r");
@@ -137,7 +139,7 @@ void Pipe::_reinit(bool crossover, Handler handler) {
 	/* this->read = fopen("/tmp/vrlink/backward", "rb"); */
 	setbuf(read, NULL);
 
-	msg("Connection established\n");
+	LOG(msg, "Connection established\n");
 }
 
 void Pipe::msg(const char *format, ...) {
@@ -152,65 +154,87 @@ struct HandlerArgs {
 	Pipe *pipe;
 	struct Thread *thread;
 	void *userdata;
+	std::thread::id remoteId;
 };
+
+thread_local std::thread::id shared_thread;
+
+static void executeTask(Pipe *pipe, struct Thread *thread, void *userdata) {
+	while(true) {
+		{
+			std::unique_lock taskLock(*thread->lock);
+			LOG(pipe->msg, "Parking thread %d\n", std::this_thread::get_id());
+			thread->cond->wait(taskLock, [&] { return thread->pending; });
+			// Take the task. we can buffer a new one
+			thread->pending = false;
+		}
+		LOG(pipe->msg, "Got task %d\n", thread->method);
+
+		if(thread->method == METH_PROTO_RET) break;
+
+		pipe->handler(thread->method, userdata);
+		LOG(pipe->msg, "Done handling %d\n", thread->method);
+		// The handler will have taken the write lock to return some
+		// values. We need to unlock it again
+		pipe->writeLock.unlock();
+	}
+}
 
 static void InternalHandler(void *userdata) {
 	struct HandlerArgs *args = (struct HandlerArgs*)userdata;
-	while(true) {
-		std::unique_lock taskLock(*args->thread->lock);
-		args->pipe->msg("Blocking thread %d\n", std::this_thread::get_id());
-		args->thread->cond->wait(taskLock, [&] { return args->thread->active; });
-		args->pipe->handler(args->thread->method, args->userdata);
-		fflush(args->pipe->write);
-		args->pipe->msg("Done handling %d\n", args->thread->method);
-		args->pipe->writeLock.unlock();
-		args->thread->active = false;
+	shared_thread = args->remoteId;
+
+	executeTask(args->pipe, args->thread, args->userdata);
+
+	LOG(args->pipe->msg, "ERR: Return from Root Task. That's not supposed to happen\n");
+	abort();
+}
+
+static struct Thread* lookupThreadData(Pipe *pipe, std::map<std::thread::id, struct Thread> *threads, std::thread::id remoteId, void *userdata, bool adopt) {
+	auto [it, inserted] = threads->try_emplace(remoteId);
+	struct Thread *thread;
+	if(inserted) {
+		if(!adopt) {
+			LOG(pipe->msg, "No existing thread for %d, creating one\n", remoteId);
+			thread = &it->second;
+			struct HandlerArgs *args = (struct HandlerArgs*)malloc(sizeof(struct HandlerArgs));
+			args->pipe = pipe;
+			args->thread = thread;
+			args->userdata = userdata;
+			args->remoteId = remoteId;
+			thread->thread = shim::thread(&InternalHandler, args);
+		} else {
+			LOG(pipe->msg, "Adopting current thread as %d\n", remoteId);
+			thread = &it->second;
+		}
+	} else {
+		LOG(pipe->msg, "Using existing thread\n");
+		thread = &threads->at(remoteId);
+		assert(!adopt || remoteId == std::this_thread::get_id());
 	}
+
+	return thread;
 }
 
 void Pipe::dispatch_requests(void* userdata) {
 	enum PipeMethod method;
 	while(true) {
 		std::unique_lock chanLock(readLock);
-		msg("Waiting for next\n");
+		LOG(msg, "Waiting for next\n");
 		recv(&method, sizeof(enum PipeMethod));
-		msg("DBG METHOD %d\n", method);
-
-		if(method == METH_PROTO_RET) {
-			size_t taskId;
-			recv(&taskId, sizeof(uint64_t));
-			msg("Task %d return\n", taskId);
-
-			wait[taskId].triggered = true;
-			// Wake up the task to have it read whatever it wants
-			wait[taskId].cond->notify_one();
-			wait[taskId].cond->wait(chanLock, [&] { return !wait[taskId].triggered; });
-			continue;
-		}
+		LOG(msg, "DBG METHOD %d\n", method);
 
 		std::thread::id remoteId;
 		recv(&remoteId, sizeof(std::thread::id));
-		msg("Incoming call %d on %d\n", method, remoteId);
 
-		auto [it, inserted] = threads.try_emplace(remoteId);
-		struct Thread *thread;
-		if(inserted) {
-			msg("No existing thread for %d, creating one\n", remoteId);
-			thread = &it->second;
-			struct HandlerArgs *args = (struct HandlerArgs*)malloc(sizeof(struct HandlerArgs));
-			args->pipe = this;
-			args->thread = thread;
-			args->userdata = userdata;
-			thread->thread = shim::thread(&InternalHandler, args);
-		} else {
-			msg("Using existing thread\n");
-			thread = &threads.at(remoteId);
-		}
+		LOG(msg, "Incoming call %d on %d\n", method, remoteId);
+
+		struct Thread *thread = lookupThreadData(this, &threads, remoteId, userdata, false);
 
 		std::unique_lock taskLock(*thread->lock);
-		assert(thread->active == false);
+		assert(thread->pending == false);
 		thread->method = method;
-		thread->active = true;
+		thread->pending = true;
 		// Wake up the thread. The thread now owns the readLock.
 		thread->cond->notify_all();
 		chanLock.release();
@@ -218,7 +242,7 @@ void Pipe::dispatch_requests(void* userdata) {
 }
 
 size_t Pipe::complete_reading_args() {
-	msg("Done reading args\n");
+	LOG(msg, "Done reading args\n");
 	size_t taskId;
 	recv(&taskId, sizeof(uint64_t));
 	readLock.unlock();
@@ -227,24 +251,30 @@ size_t Pipe::complete_reading_args() {
 
 static const enum PipeMethod retValue = METH_PROTO_RET;
 void Pipe::return_from_call(size_t taskId) {
-	msg("Taking write lock to return %d\n", taskId);
+	LOG(msg, "Taking write lock to return %d\n", taskId);
 	writeLock.lock();
-	msg("Returning to %d\n", taskId);
+	LOG(msg, "Returning to %d\n", taskId);
 	send(&retValue, sizeof(enum PipeMethod));
-	send(&taskId, sizeof(uint64_t));
+	send(&shared_thread, sizeof(shared_thread));
 }
 
 void Pipe::begin_call(enum PipeMethod method) {
-	msg("Call remote %d\n", method);
+	LOG(msg, "Call remote %d\n", method);
 	writeLock.lock();
 	send(&method, sizeof(enum PipeMethod));
 
-	std::thread::id thisId = std::this_thread::get_id();
-	send(&thisId, sizeof(std::thread::id));
+	// A thread spawned outside of our code is assigned an ID here
+	if(shared_thread == std::thread::id()) {
+		shared_thread = std::this_thread::get_id();
+		struct Thread *thread = lookupThreadData(this, &threads, shared_thread, NULL, true);
+		thread->method = method;
+	}
+
+	send(&shared_thread, sizeof(shared_thread));
 }
 
 void Pipe::wait_for_return() {
-	msg("Waiting for message return\n");
+	LOG(msg, "Waiting for message return\n");
 	size_t taskId = allocate_task();
 
 	// Send the taskid to the remote end such that it knows who to return to
@@ -254,32 +284,28 @@ void Pipe::wait_for_return() {
 	// We no longer intend to write anything
 	writeLock.unlock();
 
-	msg("Wait for return of %d\n", taskId);
-	// Wait for our call to return before reading any data
-	std::unique_lock taskLock(readLock);
-	wait[taskId].cond->wait(taskLock, [&] { return wait[taskId].triggered; });
-	msg("Wakeup %d\n", taskId);
-	wait[taskId].triggered = false;
-	wait[taskId].cond->notify_one();
-	currentTask = taskId;
-	taskLock.release();
+	struct Thread *thread = lookupThreadData(this, &threads, shared_thread, NULL, false);
+	LOG(msg, "Wait for return of %d\n", taskId);
+	executeTask(this, thread, NULL);
+
+	LOG(msg, "Wakeup %d\n", taskId);
 }
 
 void Pipe::return_read_channel() {
-	msg("Done reading return values\n");
+	LOG(msg, "Done reading return values\n");
 	readLock.unlock();
 }
 
 void Pipe::send(const void *buf, size_t len) {
 	if(fwrite(buf, 1, len, write) != len) {
-		msg("Write denied\n");
+		LOG(msg, "Write denied\n");
 		abort();
 	}
 }
 
 void Pipe::recv(void *buf, size_t max_len) {
 	if(fread(buf, 1, max_len, read) != max_len) {
-		msg("Read denied\n");
+		LOG(msg, "Read denied\n");
 		abort();
 	}
 }
@@ -296,7 +322,7 @@ void Pipe::send_fd(int fd) {
 		.iov_base = &data,
 		.iov_len = 1,
 	};
-	char control[CMSG_SPACE(sizeof (int))];
+	char control[CMSG_SPACE(sizeof (int))] = {0};
     struct msghdr msg = {
 		.msg_name = NULL,
 		.msg_namelen = 0,
@@ -325,7 +351,7 @@ void Pipe::recv_fd(int *fd) {
 		.iov_base = &data,
 		.iov_len = 1,
 	};
-	char control[CMSG_SPACE(sizeof (int))];
+	char control[CMSG_SPACE(sizeof (int))] = {0};
     struct msghdr msg = {
 		.msg_name = NULL,
 		.msg_namelen = 0,

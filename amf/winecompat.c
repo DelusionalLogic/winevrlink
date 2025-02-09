@@ -32,3 +32,8 @@ void* wine_unwrap_dev_mem(void* handle) {
 	assert(handle != NULL);
 	return (void*)wine_device_memory_from_handle((VkDeviceMemory)handle)->host_memory;
 }
+
+void* wine_unwrap_queue(void* handle) {
+	assert(handle != NULL);
+	return wine_queue_from_handle(handle)->host_queue;
+}

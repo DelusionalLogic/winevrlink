@@ -6,9 +6,8 @@
 #include <cstdio>
 #include <libdrm/drm_fourcc.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "dmabuf_attributes.h"
-
-#define FOURCC(code) {(char)(code), (char)(code >> 8), (char)(code >> 16), (char)(code >> 24)}
 
 #define STUB(pipe) \
 do { \
@@ -68,7 +67,7 @@ class VRDriverDirect : IVRDriverDirectModeComponent
 	uint64_t ourRefs[6];
 	uint64_t theirRefs[6];
 
-	vr::SharedTextureHandle_t TranslateToTheirs(vr::SharedTextureHandle_t ours);
+	bool TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs);
 public:
 	VRDriverDirect(uint64_t objId) : objId(objId) {};
 
@@ -82,25 +81,17 @@ public:
 	virtual void GetFrameTiming( DriverDirectMode_FrameTiming *pFrameTiming );
 };
 
-// This is closer to the actual definition of this class in the vrserver binary.
-// It's really an extension of the one in the public api, but we can't extend
-// that one since the destructor overlaps real functions.
 class IVRIPCResourceManagerClient2 {
 public:
 	virtual bool NewSharedVulkanImage( uint32_t nImageFormat, uint32_t nWidth, uint32_t nHeight, bool bRenderable, bool bMappable, bool bComputeAccess, uint32_t unMipLevels, uint32_t unArrayLayerCount, vr::SharedTextureHandle_t *pSharedHandle ) = 0;
-	virtual bool NewSharedVulkanBuffer( size_t nSize, uint32_t nUsageFlags, vr::SharedTextureHandle_t *pSharedHandle ) = 0;
+	virtual bool NewSharedVulkanBuffer( uint32_t nSize, uint32_t nUsageFlags, vr::SharedTextureHandle_t *pSharedHandle ) = 0;
 	virtual bool NewSharedVulkanSemaphore( vr::SharedTextureHandle_t *pSharedHandle ) = 0;
 	virtual bool RefResource( vr::SharedTextureHandle_t hSharedHandle, uint64_t *pNewIpcHandle ) = 0;
 	virtual bool UnrefResource( vr::SharedTextureHandle_t hSharedHandle ) = 0;
-
-	// These are the new parts
-	virtual void pad1() = 0;
-	virtual void pad2() = 0;
-	virtual uint64_t ImportDmabuf(uint64_t appType, struct DmabufAttributes_t *dma, vr::SharedTextureHandle_t *pSharedHandle) = 0;
-	virtual uint32_t recvfd(uint64_t ipcHandle, int *newFd) = 0;
-
-protected:
-	virtual ~IVRIPCResourceManagerClient2() {};
+	virtual bool GetDmabufFormats( uint32_t *pOutFormatCount, uint32_t *pOutFormats ) = 0;
+	virtual bool GetDmabufModifiers( vr::EVRApplicationType eApplicationType, uint32_t unDRMFormat, uint32_t *pOutModifierCount, uint64_t *pOutModifiers ) = 0;
+	virtual bool ImportDmabuf( vr::EVRApplicationType eApplicationType, DmabufAttributes_t *pDmabufAttributes, vr::SharedTextureHandle_t *pSharedHandle ) = 0;
+	virtual bool ReceiveSharedFd( uint64_t ulIpcHandle, int *pOutFd ) = 0;
 };
 
 void VRDriverDirect::CreateSwapTextureSet( uint32_t unPid, const SwapTextureSetDesc_t *pSwapTextureSetDesc, SwapTextureSet_t *pOutSwapTextureSet ) {
@@ -134,30 +125,38 @@ void VRDriverDirect::CreateSwapTextureSet( uint32_t unPid, const SwapTextureSetD
 	global_pipe.recv(&theirRefs[refs + 0], sizeof(theirRefs[refs + 0]));
 	global_pipe.recv(&theirRefs[refs + 1], sizeof(theirRefs[refs + 1]));
 	global_pipe.recv(&theirRefs[refs + 2], sizeof(theirRefs[refs + 2]));
+	uint32_t pitches[3];
+	global_pipe.recv(&pitches[0], sizeof(pitches[0]));
+	global_pipe.recv(&pitches[1], sizeof(pitches[1]));
+	global_pipe.recv(&pitches[2], sizeof(pitches[2]));
 	global_pipe.return_read_channel();
 
 	IVRIPCResourceManagerClient2 *resMan = (IVRIPCResourceManagerClient2*)vr::VRIPCResourceManager();
+	assert(resMan != NULL);
 	for(uint8_t i = 0; i < 3; i++) {
 		global_pipe.msg("Importing texture %d\n", i);
 		struct DmabufAttributes_t dma = {
 			.pNext = nullptr,
-			.width = pSwapTextureSetDesc->nWidth,
-			.height = pSwapTextureSetDesc->nHeight,
-			.depth = 1,
-			.mipLevels = 1,
-			.layers = 1,
-			.samples = 1,
+			.unWidth = pSwapTextureSetDesc->nWidth,
+			.unHeight = pSwapTextureSetDesc->nHeight,
+			.unDepth = 1,
+			.unMipLevels = 1,
+			.unArrayLayers = 1,
+			.unSampleCount = 1,
 			// This fits VkFormat 43 R8G8B8A8 I think
-			.format = FOURCC(DRM_FORMAT_ARGB8888),
-			.drmFormatModifer = DRM_FORMAT_MOD_LINEAR,
-			.plane_count = 1,
-			.offset = 0,
-			.rowpitch = pSwapTextureSetDesc->nWidth * 4, // Just a guess
-			.fd = fds[i],
+			.unFormat = DRM_FORMAT_ABGR8888,
+			.ulModifier = DRM_FORMAT_MOD_LINEAR,
+			.unPlaneCount = 1,
+			.plane = {{
+				.unOffset = 0,
+				.unStride = pitches[i],
+				.nFd = fds[i],
+			}}
 		};
 		vr::SharedTextureHandle_t sharedHandle = 0;
-		global_pipe.msg("Begin remote call %d, %d\n", sharedHandle, unPid);
+		global_pipe.msg("Begin remote call %lu, %u\n", sharedHandle, unPid);
 		uint64_t success = resMan->ImportDmabuf(vr::EVRApplicationType::VRApplication_Other, &dma, &sharedHandle);
+		close(fds[i]);
 		if(success != 1) {
 			global_pipe.msg("Import Dmabuf failed %d\n", success);
 			assert(success == 1);
@@ -177,30 +176,38 @@ void VRDriverDirect::DestroySwapTextureSet( vr::SharedTextureHandle_t sharedText
 void VRDriverDirect::DestroyAllSwapTextureSets( uint32_t unPid ) {
 	STUB(global_pipe);
 }
-vr::SharedTextureHandle_t VRDriverDirect::TranslateToTheirs(vr::SharedTextureHandle_t ours) {
-	if(ours == 0) return 0;
+bool VRDriverDirect::TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs) {
+	if(ours == 0) {
+		*theirs = 0;
+		return true;
+	}
 	for(uint8_t i = 0; i < refs; i++) {
 		if(ourRefs[i] == ours) {
-			return theirRefs[i];
+			*theirs = theirRefs[i];
+			return true;
 		}
 	}
-	global_pipe.msg("Unknown our ref %p returning %p\n", ours, theirRefs[0]);
-	return theirRefs[0];
+	return false;
 }
 void VRDriverDirect::GetNextSwapTextureSetIndex( vr::SharedTextureHandle_t sharedTextureHandles[ 2 ], uint32_t( *pIndices )[ 2 ] ) {
 	global_pipe.msg("call GetNextSwapTextureSetIndex(%p, %p, %p)\n", sharedTextureHandles[0], sharedTextureHandles[1], pIndices);
 
+	vr::SharedTextureHandle_t theirRef[2];
+	if(!TranslateToTheirs(sharedTextureHandles[0], &theirRef[0])) {
+		global_pipe.msg("Unknown our ref %p skip\n", sharedTextureHandles[0]);
+		return;
+	}
+
+	if(!TranslateToTheirs(sharedTextureHandles[1], &theirRef[1])) {
+		global_pipe.msg("Unknown our ref %p skip\n", sharedTextureHandles[1]);
+		return;
+	}
+
 	global_pipe.begin_call(METH_DIRECT_NEXT);
 	global_pipe.send(&this->objId, sizeof(objId));
 
-	{
-		auto theirRef = TranslateToTheirs(sharedTextureHandles[0]);
-		global_pipe.send(&theirRef, sizeof(theirRef));
-	}
-	{
-		auto theirRef = TranslateToTheirs(sharedTextureHandles[1]);
-		global_pipe.send(&theirRef, sizeof(theirRef));
-	}
+	global_pipe.send(&theirRef[0], sizeof(theirRef[0]));
+	global_pipe.send(&theirRef[1], sizeof(theirRef[1]));
 
 	global_pipe.wait_for_return();
 
@@ -213,18 +220,26 @@ void VRDriverDirect::GetNextSwapTextureSetIndex( vr::SharedTextureHandle_t share
 void VRDriverDirect::SubmitLayer( const SubmitLayerPerEye_t( &perEye )[ 2 ] ) {
 	global_pipe.msg("call SubmitLayer(%p, %p, %p, %d)\n", perEye[0].hTexture, perEye[0].hDepthTexture, perEye[1].hTexture, perEye[1].hDepthTexture);
 
+	vr::SharedTextureHandle_t theirRef[2];
+	vr::SharedTextureHandle_t theirDepth[2];
+	for(uint8_t i = 0; i < 2; i++) {
+		if(!TranslateToTheirs(perEye[i].hTexture, &theirRef[i])) {
+			global_pipe.msg("Unknown our ref %p skip\n", perEye[i].hTexture);
+			return;
+		}
+		if(!TranslateToTheirs(perEye[i].hDepthTexture, &theirDepth[i])) {
+			global_pipe.msg("Unknown our ref %p skip\n", perEye[i].hDepthTexture);
+			return;
+		}
+	}
+
 	global_pipe.begin_call(METH_DIRECT_SUBMIT);
 	global_pipe.send(&this->objId, sizeof(objId));
 
 	for(uint8_t i = 0; i < 2; i++) {
-		{
-			auto theirRef = TranslateToTheirs(perEye[i].hTexture);
-			global_pipe.send(&theirRef, sizeof(theirRef));
-		}
-		{
-			auto theirRef = TranslateToTheirs(perEye[i].hDepthTexture);
-			global_pipe.send(&theirRef, sizeof(theirRef));
-		}
+		global_pipe.send(&theirRef[i], sizeof(theirRef[i]));
+		global_pipe.send(&theirDepth[i], sizeof(theirDepth[i]));
+
 		global_pipe.send(&perEye[i].bounds, sizeof(perEye[i].bounds));
 		global_pipe.send(&perEye[i].mProjection, sizeof(perEye[i].mProjection));
 		global_pipe.send(&perEye[i].mHmdPose, sizeof(perEye[i].mHmdPose));
@@ -239,10 +254,15 @@ void VRDriverDirect::SubmitLayer( const SubmitLayerPerEye_t( &perEye )[ 2 ] ) {
 void VRDriverDirect::Present( vr::SharedTextureHandle_t syncTexture ) {
 	global_pipe.msg("call Present(%d)\n", syncTexture);
 
+	vr::SharedTextureHandle_t theirRef;
+	if(!TranslateToTheirs(syncTexture, &theirRef)) {
+		global_pipe.msg("Unknown our ref %p skip\n", syncTexture);
+		return;
+	}
+
 	global_pipe.begin_call(METH_DIRECT_PRESENT);
 	global_pipe.send(&this->objId, sizeof(objId));
 
-	auto theirRef = TranslateToTheirs(syncTexture);
 	global_pipe.send(&theirRef, sizeof(theirRef));
 
 	global_pipe.wait_for_return();
@@ -631,6 +651,36 @@ static void handler(enum PipeMethod m, void *userdata) {
 		free(key);
 		break;
 	}
+	case METH_SETS_GFLT: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(size_t));
+		vr::IVRSettings *thisObj = ((vr::IVRSettings*)global_pipe.objs[thisHandle-1]);
+
+		uint64_t sectionLen;
+		global_pipe.recv(&sectionLen, sizeof(sectionLen));
+		char *section = (char*)malloc(sectionLen + 1);
+		global_pipe.recv(section, sectionLen);
+		section[sectionLen] = '\0';
+
+		uint64_t keyLen;
+		global_pipe.recv(&keyLen, sizeof(keyLen));
+		char *key = (char*)malloc(keyLen + 1);
+		global_pipe.recv(key, keyLen);
+		key[keyLen] = '\0';
+
+		size_t taskId = global_pipe.complete_reading_args();
+
+		vr::EVRSettingsError err;
+		float ret = thisObj->GetFloat(section, key, &err);
+
+		global_pipe.return_from_call(taskId);
+		global_pipe.send(&ret, sizeof(ret));
+		global_pipe.send(&err, sizeof(err));
+
+		free(section);
+		free(key);
+		break;
+	}
 	case METH_SETS_GSTR: {
 		size_t thisHandle;
 		global_pipe.recv(&thisHandle, sizeof(size_t));
@@ -1007,6 +1057,21 @@ static void handler(enum PipeMethod m, void *userdata) {
 		size_t taskId = global_pipe.complete_reading_args();
 
 		thisObj->TrackedDevicePoseUpdated(device, pose, sizeof(pose));
+
+		global_pipe.return_from_call(taskId);
+		break;
+	}
+	case METH_SERVER_VSYNC: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(uint64_t));
+		vr::IVRServerDriverHost *thisObj = ((vr::IVRServerDriverHost*)global_pipe.objs[thisHandle-1]);
+
+		double timeOffset;
+		global_pipe.recv(&timeOffset, sizeof(timeOffset));
+		
+		size_t taskId = global_pipe.complete_reading_args();
+
+		thisObj->VsyncEvent(timeOffset);
 
 		global_pipe.return_from_call(taskId);
 		break;

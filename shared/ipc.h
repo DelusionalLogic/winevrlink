@@ -22,6 +22,7 @@ enum PipeMethod : uint8_t {
 
 	METH_SETS_GBOOL,
 	METH_SETS_GINT,
+	METH_SETS_GFLT,
 	METH_SETS_GSTR,
 
 	METH_PATH_READ,
@@ -34,6 +35,7 @@ enum PipeMethod : uint8_t {
 
 	METH_SERVER_DEVADD,
 	METH_SERVER_POSE,
+	METH_SERVER_VSYNC,
 	METH_SERVER_POLL,
 
 	METH_DEV_ACTIVATE,
@@ -83,7 +85,8 @@ struct Thread {
 
 	std::unique_ptr<std::mutex> lock = std::make_unique<std::mutex>();
 	std::unique_ptr<std::condition_variable> cond = std::make_unique<std::condition_variable>();
-	bool active = false;
+
+	bool pending = false;
 };
 
 class Pipe {

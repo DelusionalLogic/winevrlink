@@ -23,7 +23,7 @@ CXXFLAGS := -g -O0 -ggdb -MMD -DLINUX -DPOSIX -Ddriver_vrdriver_EXPORTS -fstack-
 	-I/home/delusional/Documents/vrdriver/vrdriver/lib/openvr/headers \
 	-I/home/delusional/Documents/vrdriver/vrdriver/lib/openvr/samples/drivers/utils/driverlog \
 	-I/home/delusional/Documents/vrdriver/vrdriver/lib/openvr/samples/drivers/utils/vrmath \
-	-iquote$(SHARED_SRC_DIR)
+	-iquote$(SHARED_SRC_DIR) -DTRACY_ENABLE=1 -DLOG_DEBUG=1
 LDFLAGS := -shared -Wl,--no-undefined -fstack-protector-all -g -ggdb -O0
 
 $(DRIVER_SO): $(DRIVER_CPP_OBJ) $(OBJDIR)/util/utils/driverlog/libutil_driverlog.a lib/openvr/bin/linux64/libopenvr_api.a
@@ -57,12 +57,23 @@ $(OBJDIR)/openvr/Makefile:
 lib/openvr/bin/linux64/libopenvr_api.a: $(OBJDIR)/openvr/Makefile
 	$(MAKE) -C $(OBJDIR)/openvr openvr_api
 
+# Build tracy
+$(OBJDIR)/tracy/Makefile: lib/tracy/CMakeLists.txt
+	@mkdir -p $(@D)
+# Use clang here since gcc can't built tracy
+	CC=clang CXX=clang++ cmake -B $(@D)/profiler lib/tracy/profiler -DLEGACY=ON -DCMAKE_BUILD_TYPE=Release
+	CC=clang CXX=clang++ cmake -B $(@D)/client lib/tracy -DCMAKE_BUILD_TYPE=Release -DTRACY_STATIC=0 -DTRACY_VERBOSE=1
+$(OBJDIR)/tracy/profiler/tracy-profiler: $(OBJDIR)/tracy/Makefile
+	$(MAKE) -C $(OBJDIR)/tracy/profiler
+$(OBJDIR)/tracy/client/libTracyClient.so: $(OBJDIR)/tracy/Makefile
+	$(MAKE) -C $(OBJDIR)/tracy/client
+
 # The wine host process
 WINE_CXX = wineg++
 WINE_CC = winegcc
 
 HOST_SRC_DIR := dllhost
-HOST_CPP_SRC=$(wildcard $(HOST_SRC_DIR)/*.cpp) lib/tracy/public/TracyClient.cpp
+HOST_CPP_SRC=$(wildcard $(HOST_SRC_DIR)/*.cpp)
 HOST_CPP_OBJ=$(patsubst %,$(OBJDIR)/%.o, $(HOST_CPP_SRC)) ${SHARED_CPP_OBJ:%=$(OBJDIR)/$(HOST_SRC_DIR)/%}
 -include ${HOST_CPP_OBJ:.o=.d}
 
@@ -72,14 +83,10 @@ HOST_DLLS = \
 			oleaut32 \
 			winspool \
 			odbccp32
-HOST_LIBRARIES = uuid
-HOST_LDFLAGS = -g -O0 -ggdb -fno-omit-frame-pointer -fstack-protector
-HOST_CXXFLAGS = -O0 -g -ggdb -I$(HOST_SRC_DIR) -MMD -iquote$(SHARED_SRC_DIR) -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fpcc-struct-return -I/lib/tracy/public -DTRACY_ENABLE=1
+HOST_LIBRARIES = uuid 
+HOST_LDFLAGS = -g -O0 -ggdb -fno-omit-frame-pointer -fstack-protector -L$(OBJDIR)/tracy/client -Wl,-rpath=$(OBJDIR)/tracy/client -lTracyClient
+HOST_CXXFLAGS = -O0 -g -ggdb -I$(HOST_SRC_DIR) -MMD -iquote$(SHARED_SRC_DIR) -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fpcc-struct-return -iquotelib/tracy/public -DTRACY_ENABLE=1
 HOST_WIN_CXXFLAGS = -mno-cygwin -fstack-protector
-
-$(OBJDIR)/lib/tracy/public/%.cpp.o: lib/tracy/public/%.cpp
-	@mkdir -p $(@D)
-	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
 $(OBJDIR)/$(HOST_SRC_DIR)/%.win.cpp.o: $(HOST_SRC_DIR)/%.win.cpp
 	@mkdir -p $(@D)
@@ -112,9 +119,9 @@ AMFRT_DLLS = \
 			winspool \
 			odbccp32
 AMFRT_LIBRARIES = uuid
-AMFRT_LDFLAGS = -g -O0 -ggdb -fno-omit-frame-pointer -fstack-protector -shared -lvulkan -lglfw
-AMFRT_CXXFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector
-AMFRT_CFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fno-short-wchar -lvulkan
+AMFRT_LDFLAGS = -g -O0 -ggdb -fno-omit-frame-pointer -fstack-protector -shared -lglfw -L$(OBJDIR)/tracy/client -lTracyClient
+AMFRT_CXXFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -iquotelib/tracy/public -DTRACY_ENABLE=1
+AMFRT_CFLAGS = -O0 -g -ggdb -I$(AMFRT_SRC_DIR) -I"." -I"./lib/wine/include" -MMD -maccumulate-outgoing-args -march=native -fno-omit-frame-pointer -fstack-protector -fno-short-wchar
 
 $(OBJDIR)/$(AMFRT_SRC_DIR)/%.cpp.o: $(AMFRT_SRC_DIR)/%.cpp
 	@mkdir -p $(@D)
