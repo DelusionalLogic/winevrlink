@@ -208,6 +208,7 @@ void VRDriverDirect::GetNextSwapTextureSetIndex( vr::SharedTextureHandle_t share
 
 	global_pipe.send(&theirRef[0], sizeof(theirRef[0]));
 	global_pipe.send(&theirRef[1], sizeof(theirRef[1]));
+	global_pipe.send(pIndices, sizeof(*pIndices));
 
 	global_pipe.wait_for_return();
 

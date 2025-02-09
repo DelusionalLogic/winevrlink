@@ -1392,9 +1392,11 @@ static void cmd_handler(enum PipeMethod m, void *state_) {
 		state->pipe.recv(&tex[0], sizeof(tex[0]));
 		state->pipe.recv(&tex[1], sizeof(tex[1]));
 
+		uint32_t indecies[2];
+		state->pipe.recv(indecies, sizeof(indecies));
+
 		size_t taskId = state->pipe.complete_reading_args();
 
-		uint32_t indecies[2];
 		thisObj->GetNextSwapTextureSetIndex(tex, &indecies);
 
 		state->pipe.return_from_call(taskId);

@@ -1400,7 +1400,7 @@ MSABI AMF_RESULT AMFComponentImpl::SubmitInput(amf::AMFData* pData) {
 
 		// We are clearly missing synchronization somewhere. But where?
 		// This at least gives me video output.
-		usleep(120000);
+		/* usleep(20000); */
 
 		/* fclose(f); */
 	}
