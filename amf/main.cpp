@@ -42,14 +42,13 @@ do { \
 
 WINE_DEFAULT_DEBUG_CHANNEL(amf);
 
-#define VK_CHECK_RESULT(f)																				\
-{																										\
-	VkResult res = (f);																					\
-	if (res != VK_SUCCESS)																				\
-	{																									\
-		WINE_ERR("Fatal : VkResult\n");                                                                 \
-		assert(res == VK_SUCCESS);																		\
-	}																									\
+#define VK_CHECK_RESULT(f) \
+{ \
+	VkResult res = (f); \
+	if (res != VK_SUCCESS) { \
+		WINE_ERR("Fatal : VkResult %d\n", res); \
+		assert(res == VK_SUCCESS); \
+	} \
 }
 
 #define VK_PROCS                \
@@ -1361,41 +1360,41 @@ MSABI AMF_RESULT AMFComponentImpl::SubmitInput(amf::AMFData* pData) {
 		vkDev->FlushRenderingCommands();
 		vkDev->LockSubmissionQueue();
 
-		VkInstance instance = 0;
-		VkPhysicalDevice physicalDevice = 0;
-		VkDevice device = 0;
-		vkDev->GetVulkanHandles(&instance, &physicalDevice, &device);
+		/* VkInstance instance = 0; */
+		/* VkPhysicalDevice physicalDevice = 0; */
+		/* VkDevice device = 0; */
+		/* vkDev->GetVulkanHandles(&instance, &physicalDevice, &device); */
 
-		VkQueue queue;
-		uint32_t queueFamily;
-		vkDev->GetSubmissionQueue(&queue, &queueFamily);
+		/* VkQueue queue; */
+		/* uint32_t queueFamily; */
+		/* vkDev->GetSubmissionQueue(&queue, &queueFamily); */
 
-		VkImage image;
-		VkImageLayout layout;
-		VkImageCreateInfo createInfo = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-			.pNext = nullptr,
-			.queueFamilyIndexCount = 0,
-			.pQueueFamilyIndices = nullptr,
-		};
-		dxvkSurface->GetVulkanImageInfo(&image, &layout, &createInfo);
+		/* VkImage image; */
+		/* VkImageLayout layout; */
+		/* VkImageCreateInfo createInfo = { */
+		/* 	.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, */
+		/* 	.pNext = nullptr, */
+		/* 	.queueFamilyIndexCount = 0, */
+		/* 	.pQueueFamilyIndices = nullptr, */
+		/* }; */
+		/* dxvkSurface->GetVulkanImageInfo(&image, &layout, &createInfo); */
 		
-		VkDeviceMemory memory;
-		VkDeviceSize size;
-		dxvkSurface->GetVulkanDeviceMemory(&memory, &size);
+		/* VkDeviceMemory memory; */
+		/* VkDeviceSize size; */
+		/* dxvkSurface->GetVulkanDeviceMemory(&memory, &size); */
 
-		char filename[32];
-		sprintf(filename, "img/%d.dat", imgid++);
-		FILE *f;
-		/* FILE *f = fopen(filename, "w"); */
+		/* char filename[32]; */
+		/* sprintf(filename, "img/%d.dat", imgid++); */
+		/* FILE *f; */
+		/* /1* FILE *f = fopen(filename, "w"); *1/ */
 
-		instance = (VkInstance)wine_unwrap_instance(instance);
-		physicalDevice = (VkPhysicalDevice)wine_unwrap_phys_dev(physicalDevice);
-		device = (VkDevice)wine_unwrap_device(device);
-		queue = (VkQueue)wine_unwrap_queue(queue);
-		memory = (VkDeviceMemory)wine_unwrap_dev_mem(memory);
-		WINE_TRACE("Vulkan handles after unwrap %p %p %p\n", device, queue, physicalDevice);
-		WINE_TRACE("Image extent %ux%u layout %d tiling %d\n", createInfo.extent.width, createInfo.extent.height, createInfo.format, createInfo.tiling);
+		/* instance = (VkInstance)wine_unwrap_instance(instance); */
+		/* physicalDevice = (VkPhysicalDevice)wine_unwrap_phys_dev(physicalDevice); */
+		/* device = (VkDevice)wine_unwrap_device(device); */
+		/* queue = (VkQueue)wine_unwrap_queue(queue); */
+		/* memory = (VkDeviceMemory)wine_unwrap_dev_mem(memory); */
+		/* WINE_TRACE("Vulkan handles after unwrap %p %p %p\n", device, queue, physicalDevice); */
+		/* WINE_TRACE("Image extent %ux%u layout %d tiling %d\n", createInfo.extent.width, createInfo.extent.height, createInfo.format, createInfo.tiling); */
 		/* saveScreenshot(f, instance, device, queue, queueFamily, physicalDevice, createInfo.format, image, createInfo.extent.width, createInfo.extent.height, createInfo.tiling, memory, size); */
 
 		// We are clearly missing synchronization somewhere. But where?

@@ -14,6 +14,26 @@ do { \
 	pipe.msg("Unimplemented stub %s\n", __PRETTY_FUNCTION__); \
 }while(0)
 
+struct DxvkSharedTextureMetadata {
+	uint32_t             Width;
+	uint32_t             Height;
+	uint32_t             MipLevels;
+	uint32_t             ArraySize;
+	uint32_t             Format;
+	struct {
+		uint32_t Count;
+		uint32_t Quality;
+	} SampleDesc;
+	uint32_t      Usage;
+	uint32_t             BindFlags;
+	uint32_t             CPUAccessFlags;
+	uint32_t             MiscFlags;
+	uint32_t             RowPitch;
+	uint64_t         DRMFormat;
+	uint32_t TextureLayout;
+};
+
+
 typedef uint64_t handle;
 
 static void handler(enum PipeMethod, void*);
@@ -64,8 +84,8 @@ class VRDriverDirect : IVRDriverDirectModeComponent
 	uint64_t objId;
 
 	uint8_t refs = 0;
-	uint64_t ourRefs[6];
-	uint64_t theirRefs[6];
+	uint64_t ourRefs[12];
+	uint64_t theirRefs[12];
 
 	bool TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs);
 public:
@@ -100,7 +120,7 @@ void VRDriverDirect::CreateSwapTextureSet( uint32_t unPid, const SwapTextureSetD
 	// I think this is in VkFormat even though the documentation states it's in DXGI_FORMAT
 	assert(pSwapTextureSetDesc->nFormat == 43);
 	// We are going to be allocating 3 textures. Make sure we have the space for that
-	assert(refs <= 3);
+	assert(refs <= (sizeof(ourRefs)/sizeof(ourRefs[0])) - 3);
 
 	global_pipe.begin_call(METH_DIRECT_CSWAP);
 	global_pipe.send(&this->objId, sizeof(uint64_t));
@@ -177,10 +197,9 @@ void VRDriverDirect::DestroyAllSwapTextureSets( uint32_t unPid ) {
 	STUB(global_pipe);
 }
 bool VRDriverDirect::TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs) {
-	if(ours == 0) {
-		*theirs = 0;
-		return true;
-	}
+	*theirs = 0;
+	if(ours == 0) return true;
+
 	for(uint8_t i = 0; i < refs; i++) {
 		if(ourRefs[i] == ours) {
 			*theirs = theirRefs[i];
@@ -190,6 +209,10 @@ bool VRDriverDirect::TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::Share
 	return false;
 }
 void VRDriverDirect::GetNextSwapTextureSetIndex( vr::SharedTextureHandle_t sharedTextureHandles[ 2 ], uint32_t( *pIndices )[ 2 ] ) {
+#if 1
+	STUB(global_pipe);
+	return;
+#else
 	global_pipe.msg("call GetNextSwapTextureSetIndex(%p, %p, %p)\n", sharedTextureHandles[0], sharedTextureHandles[1], pIndices);
 
 	vr::SharedTextureHandle_t theirRef[2];
@@ -217,20 +240,66 @@ void VRDriverDirect::GetNextSwapTextureSetIndex( vr::SharedTextureHandle_t share
 	global_pipe.return_read_channel();
 
 	global_pipe.msg("ret %d %d\n", (*pIndices)[0], (*pIndices)[1]);
+#endif
 }
 void VRDriverDirect::SubmitLayer( const SubmitLayerPerEye_t( &perEye )[ 2 ] ) {
-	global_pipe.msg("call SubmitLayer(%p, %p, %p, %d)\n", perEye[0].hTexture, perEye[0].hDepthTexture, perEye[1].hTexture, perEye[1].hDepthTexture);
+	global_pipe.msg("call SubmitLayer(%p, %p, %p, %p)\n", perEye[0].hTexture, perEye[0].hDepthTexture, perEye[1].hTexture, perEye[1].hDepthTexture);
 
-	vr::SharedTextureHandle_t theirRef[2];
-	vr::SharedTextureHandle_t theirDepth[2];
+	vr::SharedTextureHandle_t ourRef[4] = {0};
 	for(uint8_t i = 0; i < 2; i++) {
-		if(!TranslateToTheirs(perEye[i].hTexture, &theirRef[i])) {
-			global_pipe.msg("Unknown our ref %p skip\n", perEye[i].hTexture);
-			return;
-		}
-		if(!TranslateToTheirs(perEye[i].hDepthTexture, &theirDepth[i])) {
-			global_pipe.msg("Unknown our ref %p skip\n", perEye[i].hDepthTexture);
-			return;
+		ourRef[i] = perEye[i].hTexture;
+		ourRef[i+2] = perEye[i].hDepthTexture;
+	}
+
+	vr::SharedTextureHandle_t theirRef[4] = {0};
+	for(uint8_t i = 0; i < 4; i++) {
+		TranslateToTheirs(ourRef[i], &theirRef[i]);
+	}
+
+	IVRIPCResourceManagerClient2 *resMan = (IVRIPCResourceManagerClient2*)vr::VRIPCResourceManager();
+	for(uint8_t i = 0; i < 4; i++) {
+		if(theirRef[i] == 0 && ourRef[i] != 0) {
+			uint64_t ipcHandle;
+			if(!resMan->RefResource(ourRef[i], &ipcHandle)) {
+				global_pipe.msg("RefResource Failed of %p", ourRef[i]);
+				continue;
+			}
+
+			int fd;
+			if(!resMan->ReceiveSharedFd(ipcHandle, &fd)) {
+				global_pipe.msg("RecvFd Failed of %p", ourRef[i]);
+				continue;
+			}
+
+			global_pipe.begin_call(METH_PROTO_TEXTURE);
+			global_pipe.send_fd(fd);
+			struct DxvkSharedTextureMetadata metadata = {
+				.Width = 3574,
+				.Height = 3574,
+				.MipLevels = 1,
+				.ArraySize = 1,
+				.Format = 29,
+				.SampleDesc = {
+					.Count = 1,
+					.Quality = 0,
+				},
+				.Usage = 0,
+				.CPUAccessFlags = 0,
+				.MiscFlags = 0,
+				.RowPitch = 3574,
+				.DRMFormat = 0,
+				.TextureLayout = 0,
+			};
+			global_pipe.send(&metadata, sizeof(metadata));
+			global_pipe.wait_for_return();
+			global_pipe.recv(&theirRef[i], sizeof(theirRef[i]));
+			global_pipe.return_read_channel();
+
+			assert(refs < (sizeof(ourRefs)/sizeof(ourRefs[0])));
+			ourRefs[refs] = ourRef[i];
+			theirRefs[refs] = theirRef[i];
+			global_pipe.msg("PROTO Texture %d ref %p imported %p\n", i, theirRefs[refs], ourRefs[refs]);
+			refs++;
 		}
 	}
 
@@ -239,7 +308,7 @@ void VRDriverDirect::SubmitLayer( const SubmitLayerPerEye_t( &perEye )[ 2 ] ) {
 
 	for(uint8_t i = 0; i < 2; i++) {
 		global_pipe.send(&theirRef[i], sizeof(theirRef[i]));
-		global_pipe.send(&theirDepth[i], sizeof(theirDepth[i]));
+		global_pipe.send(&theirRef[i+2], sizeof(theirRef[i+2]));
 
 		global_pipe.send(&perEye[i].bounds, sizeof(perEye[i].bounds));
 		global_pipe.send(&perEye[i].mProjection, sizeof(perEye[i].mProjection));
@@ -253,7 +322,7 @@ void VRDriverDirect::SubmitLayer( const SubmitLayerPerEye_t( &perEye )[ 2 ] ) {
 	global_pipe.msg("ret\n");
 }
 void VRDriverDirect::Present( vr::SharedTextureHandle_t syncTexture ) {
-	global_pipe.msg("call Present(%d)\n", syncTexture);
+	global_pipe.msg("call Present(%p)\n", syncTexture);
 
 	vr::SharedTextureHandle_t theirRef;
 	if(!TranslateToTheirs(syncTexture, &theirRef)) {
@@ -1019,6 +1088,56 @@ static void handler(enum PipeMethod m, void *userdata) {
 		free(c);
 		break;
 	}
+	case METH_MB_UNDOC2: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(uint64_t));
+		vr::IVRMailbox *thisObj = ((vr::IVRMailbox*)global_pipe.objs[thisHandle-1]);
+
+		vr::vrmb_typea arg1;
+		global_pipe.recv(&arg1, sizeof(uint64_t));
+
+		size_t taskId = global_pipe.complete_reading_args();
+
+		vr::vrmb_typeb ret = thisObj->undoc2(arg1);
+
+		global_pipe.return_from_call(taskId);
+		global_pipe.msg("undoc2 ret %d\n", ret);
+		global_pipe.send(&ret, sizeof(ret));
+		break;
+	}
+	case METH_MB_UNDOC3: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(uint64_t));
+		vr::IVRMailbox *thisObj = ((vr::IVRMailbox*)global_pipe.objs[thisHandle-1]);
+
+		vr::vrmb_typea arg1;
+		global_pipe.recv(&arg1, sizeof(uint64_t));
+
+		uint64_t blen;
+		global_pipe.recv(&blen, sizeof(blen));
+		char *b = (char*)malloc(blen);
+		global_pipe.recv(b, blen);
+
+		uint64_t clen;
+		global_pipe.recv(&clen, sizeof(clen));
+		char *c = (char*)malloc(clen);
+		global_pipe.recv(c, clen);
+
+		bool d;
+		global_pipe.recv(&d, sizeof(d));
+		
+		size_t taskId = global_pipe.complete_reading_args();
+
+		vr::vrmb_typeb ret = thisObj->undoc3(arg1, b, c, d);
+
+		global_pipe.return_from_call(taskId);
+		global_pipe.msg("undoc3 ret %d\n", ret);
+		global_pipe.send(&ret, sizeof(ret));
+
+		free(b);
+		free(c);
+		break;
+	}
 	case METH_MB_UNDOC4: {
 		size_t thisHandle;
 		global_pipe.recv(&thisHandle, sizeof(uint64_t));
@@ -1077,6 +1196,27 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.return_from_call(taskId);
 		break;
 	}
+	case METH_SERVER_VENDOR: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(uint64_t));
+		vr::IVRServerDriverHost *thisObj = ((vr::IVRServerDriverHost*)global_pipe.objs[thisHandle-1]);
+
+		uint32_t dev;
+		global_pipe.recv(&dev, sizeof(dev));
+		vr::EVREventType type;
+		global_pipe.recv(&type, sizeof(type));
+		vr::VREvent_Data_t eventData;
+		global_pipe.recv(&eventData, sizeof(eventData));
+		double timeOffset;
+		global_pipe.recv(&timeOffset, sizeof(timeOffset));
+		
+		size_t taskId = global_pipe.complete_reading_args();
+
+		thisObj->VendorSpecificEvent(dev, type, eventData, timeOffset);
+
+		global_pipe.return_from_call(taskId);
+		break;
+	}
 	case METH_SERVER_POLL: {
 		size_t thisHandle;
 		global_pipe.recv(&thisHandle, sizeof(uint64_t));
@@ -1095,6 +1235,25 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.send(&buf, eventSize);
 
 		free(buf);
+		break;
+	}
+	case METH_SERVER_PROJ: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(uint64_t));
+		vr::IVRServerDriverHost *thisObj = ((vr::IVRServerDriverHost*)global_pipe.objs[thisHandle-1]);
+
+		uint32_t dev;
+		global_pipe.recv(&dev, sizeof(dev));
+		vr::HmdRect2_t left;
+		global_pipe.recv(&left, sizeof(left));
+		vr::HmdRect2_t right;
+		global_pipe.recv(&right, sizeof(right));
+		
+		size_t taskId = global_pipe.complete_reading_args();
+
+		thisObj->SetDisplayProjectionRaw(dev, left, right);
+
+		global_pipe.return_from_call(taskId);
 		break;
 	}
 	default: {

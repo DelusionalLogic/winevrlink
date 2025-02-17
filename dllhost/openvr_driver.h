@@ -2349,7 +2349,7 @@ namespace vr
 	public:
 		virtual MSABI vrmb_typeb undoc1( const char *a, vrmb_typea *b, char *c, uint32_t d ) = 0;
 		virtual MSABI vrmb_typeb undoc2( vrmb_typea a ) = 0;
-		virtual MSABI vrmb_typeb undoc3( vrmb_typea a, const char *b, const char *c ) = 0;
+		virtual MSABI vrmb_typeb undoc3( vrmb_typea a, const char *b, const char *c, bool d ) = 0;
 		virtual MSABI vrmb_typeb undoc4( vrmb_typea a, char *b, uint32_t c, uint32_t *d ) = 0;
 	};
 

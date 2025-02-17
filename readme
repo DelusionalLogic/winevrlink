@@ -10,7 +10,7 @@ unoptimized, and weird. What it does have going for it is that it works. Using
 this you can wirelessly open the SteamVR home from the official SteamVR app for
 Oculus, at a glorious 2 frames per second.
 
-As mentioned, this is a major hackjob, involving close to 100 hours of
+As mentioned, this is a major hackjob, involving close to 200 hours of
 reversing internal Steam components and quite a bit of guesswork. The
 difficulty of running the thing will reflect that. If that catches your
 interest though, it's all here.
@@ -22,6 +22,18 @@ half of that domain socket is `native/` which is an openvr driver that creates
 the domain socket on startup and exchanges data with `dllhost` as a cross-wine
 RPC. Finally, `amf/` holds a shim for AMD's AMF to emulate it by using the host
 implementation and dxvk.
+
+Current limits
+--------------
+
+The linux version of vrclient (the library used by games to interface with
+openvr) doesn't _correctly_ allocate framebuffer textures. The steam vrlink
+driver doesn't like that. The problem [has been
+reported](https://github.com/ValveSoftware/openvr/issues/1884) on the openvr
+bugtracker, but it's probably not a high priority for Valve.
+
+There is stuff we can maybe do to work around it, but it would require some
+fairly intense reversing to find the texture metadata in the vrcompositor.
 
 Getting steam to advertise support
 ----------------------------------

@@ -13,6 +13,7 @@
 #include <windows.h>
 #include <wine/windows/d3d11.h>
 #include <winternl.h>
+#include <ntstatus.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <d3d11_4.h>
@@ -55,6 +56,13 @@ struct DxvkSharedTextureMetadata {
 	uint64_t         DRMFormat;
 	D3D11_TEXTURE_LAYOUT TextureLayout;
 };
+
+#define IOCTL_SHARED_GPU_RESOURCE_SET_METADATA           CTL_CODE(FILE_DEVICE_VIDEO, 4, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+
+bool setSharedMetadata(HANDLE handle, void *buf, uint32_t bufSize) {
+	DWORD retSize;
+	return ::DeviceIoControl(handle, IOCTL_SHARED_GPU_RESOURCE_SET_METADATA, buf, bufSize, NULL, 0, &retSize, NULL);
+}
 
 #define IOCTL_SHARED_GPU_RESOURCE_GET_METADATA           CTL_CODE(FILE_DEVICE_VIDEO, 5, METHOD_BUFFERED, FILE_READ_ACCESS)
 
@@ -130,6 +138,90 @@ static HANDLE open_shared_resource(HANDLE kmt_handle, LPCWSTR name) {
 
 #define IOCTL_SHARED_GPU_RESOURCE_GET_UNIX_RESOURCE           CTL_CODE(FILE_DEVICE_VIDEO, 3, METHOD_BUFFERED, FILE_READ_ACCESS)
 #define IOCTL_SHARED_GPU_RESOURCE_GET_DMA_RESOURCE           CTL_CODE(FILE_DEVICE_VIDEO, 8, METHOD_BUFFERED, FILE_READ_ACCESS)
+
+#define IOCTL_SHARED_GPU_RESOURCE_CREATE           CTL_CODE(FILE_DEVICE_VIDEO, 0, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+
+struct shared_resource_create
+{
+    UINT64 resource_size;
+    obj_handle_t unix_handle;
+    obj_handle_t dma_handle;
+    WCHAR name[1];
+};
+
+extern "C" NTSYSAPI NTSTATUS CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *unix_fd, unsigned int *options );
+extern "C" NTSYSAPI NTSTATUS CDECL wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attributes, HANDLE *handle );
+static HANDLE create_gpu_resource(int fd, int dma_fd, UINT64 resource_size)
+{
+    static const WCHAR shared_gpu_resourceW[] = {'\\','?','?','\\','S','h','a','r','e','d','G','p','u','R','e','s','o','u','r','c','e',0};
+    HANDLE unix_resource = INVALID_HANDLE_VALUE;
+    HANDLE dma_resource = INVALID_HANDLE_VALUE;
+    struct shared_resource_create *inbuff;
+    UNICODE_STRING shared_gpu_resource_us;
+    HANDLE shared_resource;
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS status;
+    DWORD in_size;
+
+    WINE_TRACE("Creating shared vulkan resource fd %d\n", fd);
+
+    if (wine_server_fd_to_handle(fd, GENERIC_ALL, 0, &unix_resource) != STATUS_SUCCESS) {
+        return INVALID_HANDLE_VALUE;
+    }
+
+    init_unicode_string(&shared_gpu_resource_us, shared_gpu_resourceW);
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = 0;
+    attr.ObjectName = &shared_gpu_resource_us;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if((status = NtCreateFile(&shared_resource, GENERIC_READ | GENERIC_WRITE, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0))) {
+        WINE_ERR("Failed to load open a shared resource handle, status %#lx.\n", (long int)status);
+        NtClose(unix_resource);
+        NtClose(dma_resource);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    in_size = sizeof(*inbuff);
+    inbuff = (struct shared_resource_create*)calloc(1, in_size);
+    inbuff->unix_handle = wine_server_obj_handle(unix_resource);
+    inbuff->dma_handle = wine_server_obj_handle(dma_resource);
+    inbuff->resource_size = resource_size;
+
+    status = NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_CREATE, inbuff, in_size, NULL, 0);
+
+    free(inbuff);
+    NtClose(unix_resource);
+    NtClose(dma_resource);
+
+    if (status)
+    {
+        WINE_ERR("Failed to create video resource, status %#lx.\n", (long int)status);
+        NtClose(shared_resource);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    return shared_resource;
+}
+
+#define IOCTL_SHARED_GPU_RESOURCE_GETKMT           CTL_CODE(FILE_DEVICE_VIDEO, 2, METHOD_BUFFERED, FILE_READ_ACCESS)
+
+static HANDLE get_shared_resource_kmt_handle(HANDLE shared_resource)
+{
+    IO_STATUS_BLOCK iosb;
+    obj_handle_t kmt_handle;
+
+    if (NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_GETKMT,
+            NULL, 0, &kmt_handle, sizeof(kmt_handle)))
+        return INVALID_HANDLE_VALUE;
+
+    return wine_server_ptr_handle(kmt_handle);
+}
+
 
 extern "C" NTSYSAPI NTSTATUS CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *unix_fd, unsigned int *options );
 static int get_shared_resource_fd(HANDLE shared_resource, struct DriverState *state, uint32_t *rowPitch) {
@@ -340,7 +432,7 @@ public:
 
 	MSABI virtual vr::vrmb_typeb undoc1(const char *a, vr::vrmb_typea *b, char *c, uint32_t d);
 	MSABI virtual vr::vrmb_typeb undoc2(vr::vrmb_typea a);
-	MSABI virtual vr::vrmb_typeb undoc3(vr::vrmb_typea a, const char *b, const char *c);
+	MSABI virtual vr::vrmb_typeb undoc3(vr::vrmb_typea a, const char *b, const char *c, bool d);
 	MSABI virtual vr::vrmb_typeb undoc4(vr::vrmb_typea a, char *b, uint32_t c, uint32_t *d);
 };
 
@@ -366,12 +458,39 @@ MSABI vr::vrmb_typeb VRMailbox::undoc1(const char *a, vr::vrmb_typea *b, char *c
 	return ret;
 }
 MSABI vr::vrmb_typeb VRMailbox::undoc2(vr::vrmb_typea a) {
-	STUB();
-	return vr::vrmb_typeb::valueb;
+	WINE_TRACE("call undoc2(%ld)\n", a);
+	ZoneScoped;
+	state->pipe.begin_call(METH_MB_UNDOC2);
+	state->pipe.send(&objId, sizeof(uint64_t));
+	state->pipe.send(&a, sizeof(a));
+
+	state->pipe.wait_for_return();
+
+	vr::vrmb_typeb ret;
+	state->pipe.recv(&ret, sizeof(ret));
+	state->pipe.return_read_channel();
+	return ret;
 }
-MSABI vr::vrmb_typeb VRMailbox::undoc3(vr::vrmb_typea a, const char *b, const char *c) {
-	STUB();
-	return vr::vrmb_typeb::valueb;
+MSABI vr::vrmb_typeb VRMailbox::undoc3(vr::vrmb_typea a, const char *b, const char *c, bool d) {
+	WINE_TRACE("call undoc3(%ld, %p, %p, %d)\n", a, b, c, d);
+	ZoneScoped;
+	state->pipe.begin_call(METH_MB_UNDOC3);
+	state->pipe.send(&objId, sizeof(uint64_t));
+	state->pipe.send(&a, sizeof(a));
+	uint64_t blen = strlen(b);
+	state->pipe.send(&blen, sizeof(uint64_t));
+	state->pipe.send(b, blen);
+	uint64_t clen = strlen(c);
+	state->pipe.send(&clen, sizeof(uint64_t));
+	state->pipe.send(c, clen);
+	state->pipe.send(&d, sizeof(d));
+
+	state->pipe.wait_for_return();
+
+	vr::vrmb_typeb ret;
+	state->pipe.recv(&ret, sizeof(ret));
+	state->pipe.return_read_channel();
+	return ret;
 }
 MSABI vr::vrmb_typeb VRMailbox::undoc4(vr::vrmb_typea a, char *b, uint32_t c, uint32_t *d) {
 	WINE_TRACE("call undoc4(%ld, %p, %d, %p)\n", a, b, c, d);
@@ -576,7 +695,20 @@ MSABI void VRServerDriverHost::VsyncEvent(double vsyncTimeOffsetSeconds) {
 	WINE_TRACE("ret\n");
 }
 MSABI void VRServerDriverHost::VendorSpecificEvent(uint32_t unWhichDevice, vr::EVREventType eventType, const vr::VREvent_Data_t & eventData, double eventTimeOffset) {
-	STUB();
+	WINE_TRACE("call VendorSpecificEvent(%d %d %p %lf)\n", unWhichDevice, eventType, &eventData, eventTimeOffset);
+
+	state->pipe.begin_call(METH_SERVER_VENDOR);
+	state->pipe.send(&objId, sizeof(objId));
+	state->pipe.send(&unWhichDevice, sizeof(unWhichDevice));
+	state->pipe.send(&eventType, sizeof(eventType));
+	state->pipe.send(&eventData, sizeof(eventData));
+	state->pipe.send(&eventTimeOffset, sizeof(eventTimeOffset));
+
+	state->pipe.wait_for_return();
+
+	state->pipe.return_read_channel();
+
+	WINE_TRACE("ret\n");
 }
 MSABI bool VRServerDriverHost::IsExiting() {
 	STUB();
@@ -614,7 +746,20 @@ MSABI void VRServerDriverHost::SetDisplayEyeToHead(uint32_t unWhichDevice, const
 	STUB();
 }
 MSABI void VRServerDriverHost::SetDisplayProjectionRaw(uint32_t unWhichDevice, const vr::HmdRect2_t & eyeLeft, const vr::HmdRect2_t & eyeRight) {
-	STUB();
+	WINE_TRACE("call SetDisplayProjectionRaw(%d, %p, %p)\n", unWhichDevice, &eyeLeft, &eyeRight);
+	ZoneScoped;
+
+	state->pipe.begin_call(METH_SERVER_PROJ);
+	state->pipe.send(&objId, sizeof(size_t));
+	state->pipe.send(&unWhichDevice, sizeof(unWhichDevice));
+	state->pipe.send(&eyeLeft, sizeof(eyeLeft));
+	state->pipe.send(&eyeRight, sizeof(eyeRight));
+
+	state->pipe.wait_for_return();
+
+	state->pipe.return_read_channel();
+
+	WINE_TRACE("ret\n");
 }
 MSABI void VRServerDriverHost::SetRecommendedRenderTargetSize(uint32_t unWhichDevice, uint32_t nWidth, uint32_t nHeight) {
 	STUB();
@@ -1493,6 +1638,29 @@ static void cmd_handler(enum PipeMethod m, void *state_) {
 		WINE_TRACE("Frames done!\n");
 
 		state->pipe.return_from_call(taskId);
+		break;
+	}
+	case METH_PROTO_TEXTURE: {
+		ZoneScopedN("PROTO_TEXTURE");
+		int textureFd;
+		state->pipe.recv_fd(&textureFd);
+		WINE_TRACE("Import fd 0x%08x\n", textureFd);
+		assert(textureFd != 0);
+
+		struct DxvkSharedTextureMetadata textureMetadata;
+		state->pipe.recv(&textureMetadata, sizeof(textureMetadata));
+
+		size_t taskId = state->pipe.complete_reading_args();
+
+		HANDLE handle = create_gpu_resource(textureFd, 0, 0);
+		if(!setSharedMetadata(handle, &textureMetadata, sizeof(textureMetadata))) {
+			WINE_ERR("Failed to set texture metadata of %p\n", handle);
+		}
+		handle = get_shared_resource_kmt_handle(handle);
+
+		state->pipe.return_from_call(taskId);
+		state->pipe.send(&handle, sizeof(handle));
+		WINE_TRACE("Texture imported as %p\n", handle);
 		break;
 	}
 	default:
