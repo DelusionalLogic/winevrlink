@@ -52,7 +52,7 @@ $(OBJDIR)/util/utils/driverlog/libutil_driverlog.a: $(OBJDIR)/util/Makefile
 # Compile the openvr_api.a library
 $(OBJDIR)/openvr/Makefile:
 	@mkdir -p $(@D)
-	cmake -B $(@D) lib/openvr
+	cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -B $(@D) lib/openvr
 # Fucking thing can't compile out of the source tree SMH
 lib/openvr/bin/linux64/libopenvr_api.a: $(OBJDIR)/openvr/Makefile
 	$(MAKE) -C $(OBJDIR)/openvr openvr_api
