@@ -1171,7 +1171,7 @@ VRServerConnector::VRServerConnector(struct DriverState *state, uint64_t objId) 
 };
 
 MSABI void *VRServerConnector::GetGenericInterface( const char *pchInterfaceVersion, vr::EVRInitError *peError) {
-	WINE_TRACE("Call GetGenericInterface(%s, %p)", pchInterfaceVersion, peError);
+	WINE_TRACE("Call GetGenericInterface(%s, %p)\n", pchInterfaceVersion, peError);
 	ZoneScoped;
 
 	state->pipe.begin_call(METH_GET_INTERFACE);

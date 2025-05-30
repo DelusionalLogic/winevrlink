@@ -634,6 +634,7 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.recv(&nameLen, sizeof(uint64_t));
 		char *name = (char*)malloc(nameLen + 1);
 		global_pipe.recv(name, nameLen);
+		name[nameLen] = '\0';
 		uint64_t dirLen;
 		global_pipe.recv(&dirLen, sizeof(dirLen));
 		char *dir;
