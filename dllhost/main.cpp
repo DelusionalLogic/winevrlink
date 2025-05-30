@@ -263,7 +263,7 @@ struct NullObject{
 typedef void* (__attribute__((ms_abi)) *HmdDriverFactoryPtr)(const char*, int*);
 
 __attribute__((noreturn)) MSABI void *uhoh(struct NullObject *obj) {
-	WINE_ERR("FATAL: Unimplemented object called\n");
+	WINE_ERR("FATAL: Unimplemented object called: %s\n", obj->name);
 	abort();
 }
 
@@ -1224,6 +1224,9 @@ MSABI void *VRServerConnector::GetGenericInterface( const char *pchInterfaceVers
 		// This looks like it's used for some telemetry stuff.
 		// I can't find the interface anywhere, but returning null looks to disable it
 		return nullptr;
+	} else if(strcmp(pchInterfaceVersion, "IVRServerInternal_XXX") == 0) {
+		// I don't really know if it needs this
+		return nullptr;
 	} else if(strcmp(pchInterfaceVersion, vr::IVRMailbox_Version) == 0) {
 		return new VRMailbox(state, objId);
 	}
@@ -1692,7 +1695,7 @@ void * TrampolineHook(char* src, char* dst, int len) {
 extern "C" int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hInstPrev, PSTR cmdline, int cmdshow) {
 	ZoneScoped;
 
-	const char* driver_path = "/home/delusional/.local/share/Steam/ubuntu12_32/steamapps/content/app_17770/depot_250821/drivers/vrlink/bin/win64/driver_vrlink.dll";
+	const char* driver_path = "/home/delusional/.local/share/Steam/ubuntu12_32/steamapps/content/app_250820/depot_250821/drivers/vrlink/bin/win64/driver_vrlink.dll";
 	WINE_TRACE("Loading real vrlink driver: %s\n", driver_path);
 
 	HMODULE hDLL = LoadLibraryA(driver_path);

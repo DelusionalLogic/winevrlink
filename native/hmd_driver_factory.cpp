@@ -811,6 +811,27 @@ static void handler(enum PipeMethod m, void *userdata) {
 
 			// This is just me being lazy
 			it->pszPath = nullptr;
+
+			// @HACK This is a pretty bad hack for getting steam to forward
+			// connections to the UDP port of the driver. As part of starting
+			// up the driver has to handshake with some internal steam api and
+			// transfer a little bit of shared state (the port the driver
+			// listens on an some encryption key). In an older driver that used
+			// to happen via the driver directly invoking a URL handler, but
+			// they seem to have moved that into the vrserver component.
+			// I can't get the vrserver to actually trigger that call so I'm
+			// just doing it myself. If we could get the vrserver to invoke it
+			// for us, that would be way nicer than what we had before.
+			char pathStr[27];
+			uint32_t pathStrLen = 0;
+			if(thisObj->HandleToString(it->ulPath, pathStr, sizeof(pathStr), &pathStrLen) == ETrackedPropertyError::TrackedProp_Success) {
+				if(pathStrLen == 27 && strcmp(pathStr, "/steam/vr_connection_ready") == 0) {
+					char cmd[512];
+					sprintf(cmd, "xdg-open \'steam://vr_connection_ready/%.*s\'", it->unBufferSize, (char*)it->pvBuffer);
+					global_pipe.msg("Connection Ready Hack: %s\n", cmd);
+					system(cmd);
+				}
+			}
 		}
 
 		size_t taskId = global_pipe.complete_reading_args();
