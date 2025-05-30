@@ -84,8 +84,8 @@ class VRDriverDirect : IVRDriverDirectModeComponent
 	uint64_t objId;
 
 	uint8_t refs = 0;
-	uint64_t ourRefs[12];
-	uint64_t theirRefs[12];
+	uint64_t ourRefs[128];
+	uint64_t theirRefs[128];
 
 	bool TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs);
 public:
@@ -209,21 +209,18 @@ bool VRDriverDirect::TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::Share
 	return false;
 }
 void VRDriverDirect::GetNextSwapTextureSetIndex( vr::SharedTextureHandle_t sharedTextureHandles[ 2 ], uint32_t( *pIndices )[ 2 ] ) {
-#if 1
+#if 0
 	STUB(global_pipe);
 	return;
 #else
 	global_pipe.msg("call GetNextSwapTextureSetIndex(%p, %p, %p)\n", sharedTextureHandles[0], sharedTextureHandles[1], pIndices);
 
 	vr::SharedTextureHandle_t theirRef[2];
-	if(!TranslateToTheirs(sharedTextureHandles[0], &theirRef[0])) {
-		global_pipe.msg("Unknown our ref %p skip\n", sharedTextureHandles[0]);
-		return;
-	}
-
-	if(!TranslateToTheirs(sharedTextureHandles[1], &theirRef[1])) {
-		global_pipe.msg("Unknown our ref %p skip\n", sharedTextureHandles[1]);
-		return;
+	for(uint8_t i = 0; i < 2; i++) {
+		if(!TranslateToTheirs(sharedTextureHandles[i], &theirRef[i])) {
+			global_pipe.msg("Unknown our ref %p skip\n", sharedTextureHandles[i]);
+			return;
+		}
 	}
 
 	global_pipe.begin_call(METH_DIRECT_NEXT);
@@ -599,6 +596,26 @@ static void handler(enum PipeMethod m, void *userdata) {
 		free(buf);
 		break;
 	}
+	case METH_LOG: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(size_t));
+		vr::IVRDriverLog *thisObj = ((vr::IVRDriverLog*)global_pipe.objs[thisHandle-1]);
+
+		uint64_t len;
+		global_pipe.recv(&len, sizeof(uint64_t));
+		char *msg = (char*)malloc(len + 1);
+		global_pipe.recv(msg, len);
+		msg[len] = '\0';
+
+		size_t taskId = global_pipe.complete_reading_args();
+
+		thisObj->Log(msg);
+
+		global_pipe.return_from_call(taskId);
+
+		free(msg);
+		break;
+	}
 	case METH_RES_LOAD: {
 		size_t thisHandle;
 		global_pipe.recv(&thisHandle, sizeof(size_t));
@@ -800,6 +817,7 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.recv(&entries, sizeof(entries));
 
 		vr::PathWrite_t *batch = (vr::PathWrite_t*)malloc(sizeof(vr::PathWrite_t) * entries);
+		global_pipe.msg("WritePathBatch(%ld, %p, %d)\n", root, batch, entries);
 		for(uint64_t i = 0; i < entries; i++) {
 			vr::PathWrite_t *it =  &batch[i];
 			global_pipe.recv(&it->ulPath, sizeof(it->ulPath));

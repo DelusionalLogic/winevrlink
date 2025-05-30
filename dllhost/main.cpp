@@ -363,6 +363,10 @@ public:
 	MSABI virtual vr::EVRInputError CreateHapticComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle );
 	MSABI virtual vr::EVRInputError CreateSkeletonComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, const char *pchSkeletonPath, const char *pchBasePosePath, vr::EVRSkeletalTrackingLevel eSkeletalTrackingLevel, const vr::VRBoneTransform_t *pGripLimitTransforms, uint32_t unGripLimitTransformCount, vr::VRInputComponentHandle_t *pHandle );
 	MSABI virtual vr::EVRInputError UpdateSkeletonComponent( vr::VRInputComponentHandle_t ulComponent, vr::EVRSkeletalMotionRange eMotionRange, const vr::VRBoneTransform_t *pTransforms, uint32_t unTransformCount );
+	MSABI virtual vr::EVRInputError CreatePoseComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle );
+	MSABI virtual vr::EVRInputError UpdatePoseComponent( vr::VRInputComponentHandle_t ulComponent, vr::HmdMatrix34_t *newValue, const double fTimeOffset);
+	MSABI virtual vr::EVRInputError CreateEyeTrackingComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle );
+	MSABI virtual vr::EVRInputError UpdateEyeTrackingComponent( vr::VRInputComponentHandle_t ulComponent, void *newValue, const double fTimeOffset);
 };
 
 MSABI vr::EVRInputError VRDriverInput::CreateBooleanComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle ) {
@@ -420,6 +424,23 @@ MSABI vr::EVRInputError VRDriverInput::CreateSkeletonComponent( vr::PropertyCont
 	return vr::EVRInputError::VRInputError_NoData;
 }
 MSABI vr::EVRInputError VRDriverInput::UpdateSkeletonComponent( vr::VRInputComponentHandle_t ulComponent, vr::EVRSkeletalMotionRange eMotionRange, const vr::VRBoneTransform_t *pTransforms, uint32_t unTransformCount ) {
+	STUB();
+	return vr::EVRInputError::VRInputError_NoData;
+}
+
+MSABI vr::EVRInputError VRDriverInput::CreatePoseComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle ) {
+	STUB();
+	return vr::EVRInputError::VRInputError_NoData;
+}
+MSABI vr::EVRInputError VRDriverInput::UpdatePoseComponent( vr::VRInputComponentHandle_t ulComponent, vr::HmdMatrix34_t *newValue, const double fTimeOffset) {
+	STUB();
+	return vr::EVRInputError::VRInputError_NoData;
+}
+MSABI vr::EVRInputError VRDriverInput::CreateEyeTrackingComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle ) {
+	STUB();
+	return vr::EVRInputError::VRInputError_NoData;
+}
+MSABI vr::EVRInputError VRDriverInput::UpdateEyeTrackingComponent( vr::VRInputComponentHandle_t ulComponent, void *newValue, const double fTimeOffset) {
 	STUB();
 	return vr::EVRInputError::VRInputError_NoData;
 }
@@ -574,13 +595,14 @@ MSABI vr::ETrackedPropertyError VRPaths::WritePathBatch(vr::PropertyContainerHan
 
 	for(uint64_t i = 0; i < unBatchEntryCount; i++) {
 		vr::PathWrite_t *it =  &pBatch[i];
+		WINE_TRACE("%.*s %u\n", it->unBufferSize, (char*)it->pvBuffer, it->writeType);
 		state->pipe.send(&it->ulPath, sizeof(it->ulPath));
 		state->pipe.send(&it->writeType, sizeof(it->writeType));
 		state->pipe.send(&it->eSetError, sizeof(it->eSetError));
 		state->pipe.send(&it->unBufferSize, sizeof(it->unBufferSize));
 		state->pipe.send(it->pvBuffer, it->unBufferSize);
 		if(it->pszPath != nullptr) {
-			WINE_TRACE("The NULL alsoPath assumption did not hold %s", it->pszPath);
+			WINE_TRACE("Path assumption did not hold %s", it->pszPath);
 		}
 	}
 
@@ -593,6 +615,7 @@ MSABI vr::ETrackedPropertyError VRPaths::WritePathBatch(vr::PropertyContainerHan
 		vr::PathWrite_t *it =  &pBatch[i];
 		state->pipe.recv(&it->unTag, sizeof(it->unTag));
 		state->pipe.recv(&it->eError, sizeof(it->eError));
+		WINE_TRACE("%u %u\n", it->unTag, it->eError);
 	}
 
 	state->pipe.return_read_channel();
@@ -1056,7 +1079,18 @@ class VRDriverLog : public vr::IVRDriverLog {
 VRDriverLog::VRDriverLog(struct DriverState *state, uint64_t objId) : state(state), objId(objId) {};
 
 MSABI void VRDriverLog::Log(const char *pchLogMessage) {
-	WINE_FIXME("Direct log: %s\n", pchLogMessage);
+	WINE_TRACE("call Log(%s)\n", pchLogMessage);
+	ZoneScoped;
+
+	state->pipe.begin_call(METH_LOG);
+	state->pipe.send(&objId, sizeof(objId));
+
+	uint64_t len = strlen(pchLogMessage);
+	state->pipe.send(&len, sizeof(len));
+	state->pipe.send(pchLogMessage, len);
+
+	state->pipe.wait_for_return();
+	state->pipe.return_read_channel();
 }
 
 class VRDriverManager : public vr::IVRDriverManager {
