@@ -603,21 +603,21 @@ public:
 
 class AMFComponentImpl : AMFPropertyStorageImpl {
 	std::shared_ptr<amf::AMFComponent> inner;
-	FILE* videofile;
+	// FILE* videofile;
 	amf::AMFTrace *trace;
 	
 public:
 	AMFComponentImpl(std::shared_ptr<amf::AMFComponent> inner, amf::AMFTrace *trace) : inner(inner), AMFPropertyStorageImpl(inner), trace(trace) {
-		char filename[256];
-		int fd;
-		for(uint32_t i = 0; i < 16; i++) {
-			snprintf(filename, 256, "video_%d.mkv", i);
-			fd = open(filename, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-			if(fd < 0) continue;
-			break;
-		}
-		assert(fd >= 0);
-		videofile = fdopen(fd, "wb");
+		// char filename[256];
+		// int fd;
+		// for(uint32_t i = 0; i < 16; i++) {
+		// 	snprintf(filename, 256, "video_%d.mkv", i);
+		// 	fd = open(filename, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+		// 	if(fd < 0) continue;
+		// 	break;
+		// }
+		// assert(fd >= 0);
+		// videofile = fdopen(fd, "wb");
 	};
 
 	AMF_DECLARE_IID(0x8b51e5e4, 0x455d, 0x4034, 0xa7, 0x46, 0xde, 0x1b, 0xed, 0xc3, 0xc4, 0x6)
@@ -1114,6 +1114,8 @@ MSABI AMF_RESULT AMFContextImpl::CreateSurfaceFromDX11Native(void* pDX11Surface,
 		return AMF_RESULT::AMF_INVALID_ARG;
 	}
 
+	amf::AMFVulkanDevice *vulkanDevice = (amf::AMFVulkanDevice*)inner->GetVulkanDevice();
+
 	ID3D11Texture2D *dx11Texture = (ID3D11Texture2D*)pDX11Surface;
 	IDXGIVkInteropSurface *dxvkSurface;
 	if(dx11Texture->QueryInterface(__uuidof(IDXGIVkInteropSurface), (void**)&dxvkSurface) != 0) {
@@ -1133,7 +1135,7 @@ MSABI AMF_RESULT AMFContextImpl::CreateSurfaceFromDX11Native(void* pDX11Surface,
 		WINE_TRACE("Couldn't get the vulkan data from the texture %p\n", dxvkSurface);
 		return AMF_RESULT::AMF_FAIL;
 	}
-	WINE_TRACE("Vulkan texture %dx%d on device %p\n", createInfo.extent.width, createInfo.extent.height, ((amf::AMFVulkanDevice*)inner->GetVulkanDevice())->hDevice);
+	WINE_TRACE("Vulkan texture %dx%d on device %p\n", createInfo.extent.width, createInfo.extent.height, vulkanDevice->hDevice);
 
 	VkDeviceMemory memory;
 	VkDeviceSize memSize;
@@ -1356,18 +1358,32 @@ MSABI AMF_RESULT AMFComponentImpl::SubmitInput(amf::AMFData* pData) {
 	if(data->d3dTexture->QueryInterface(__uuidof(IDXGIVkInteropSurface), (void**)&dxvkSurface) == 0) {
 		WINE_TRACE("YES. Surface is from dxvk!\n");
 		dxvkSurface->GetDevice(&vkDev);
+		IDXGIVkInteropDevice2 *vkDevTwo = nullptr;
+		if(vkDev->QueryInterface(__uuidof(IDXGIVkInteropDevice2), (void**)&vkDevTwo) == 0) {
+			vkDevTwo->GetSemaphores(&data->surface->Sync.hSemaphore, nullptr);
+			data->surface->Sync.bSubmitted = true;
+		} else {
+			WINE_ERR("Could not get the semaphores from the dxvk device");
+			data->surface->Sync.hSemaphore = nullptr;
+			data->surface->Sync.bSubmitted = false;
+		}
 
 		vkDev->FlushRenderingCommands();
 		vkDev->LockSubmissionQueue();
 
-		/* VkInstance instance = 0; */
-		/* VkPhysicalDevice physicalDevice = 0; */
-		/* VkDevice device = 0; */
-		/* vkDev->GetVulkanHandles(&instance, &physicalDevice, &device); */
+// 		VkInstance instance = 0;
+// 		VkPhysicalDevice physicalDevice = 0;
+// 		VkDevice device = 0;
+// 		vkDev->GetVulkanHandles(&instance, &physicalDevice, &device);
+// 		instance = (VkInstance)wine_unwrap_instance(instance);
+// 		physicalDevice = (VkPhysicalDevice)wine_unwrap_phys_dev(physicalDevice);
+// 		device = (VkDevice)wine_unwrap_device(device);
+// 		WINE_TRACE("Vulkan handles after unwrap %p %p %p\n", device, queue, physicalDevice);
 
-		/* VkQueue queue; */
-		/* uint32_t queueFamily; */
-		/* vkDev->GetSubmissionQueue(&queue, &queueFamily); */
+// 		VkQueue queue;
+// 		uint32_t queueFamily;
+// 		vkDev->GetSubmissionQueue(&queue, &queueFamily);
+// 		queue = (VkQueue)wine_unwrap_queue(queue);
 
 		/* VkImage image; */
 		/* VkImageLayout layout; */
@@ -1388,12 +1404,7 @@ MSABI AMF_RESULT AMFComponentImpl::SubmitInput(amf::AMFData* pData) {
 		/* FILE *f; */
 		/* /1* FILE *f = fopen(filename, "w"); *1/ */
 
-		/* instance = (VkInstance)wine_unwrap_instance(instance); */
-		/* physicalDevice = (VkPhysicalDevice)wine_unwrap_phys_dev(physicalDevice); */
-		/* device = (VkDevice)wine_unwrap_device(device); */
-		/* queue = (VkQueue)wine_unwrap_queue(queue); */
 		/* memory = (VkDeviceMemory)wine_unwrap_dev_mem(memory); */
-		/* WINE_TRACE("Vulkan handles after unwrap %p %p %p\n", device, queue, physicalDevice); */
 		/* WINE_TRACE("Image extent %ux%u layout %d tiling %d\n", createInfo.extent.width, createInfo.extent.height, createInfo.format, createInfo.tiling); */
 		/* saveScreenshot(f, instance, device, queue, queueFamily, physicalDevice, createInfo.format, image, createInfo.extent.width, createInfo.extent.height, createInfo.tiling, memory, size); */
 
@@ -1421,11 +1432,11 @@ MSABI AMF_RESULT AMFComponentImpl::QueryOutput(amf::AMFData** ppData) {
 
 	WINE_TRACE("Got buffer of type %d\n", (*ppData)->GetMemoryType());
 
-	if((*ppData)->GetMemoryType() == 1) {
-		amf::AMFBuffer *buf = (amf::AMFBuffer*)*ppData;
-		fwrite(buf->GetNative(), 1, buf->GetSize(), videofile);
-		fflush(videofile);
-	}
+	// if((*ppData)->GetMemoryType() == 1) {
+		// amf::AMFBuffer *buf = (amf::AMFBuffer*)*ppData;
+		// fwrite(buf->GetNative(), 1, buf->GetSize(), videofile);
+		// fflush(videofile);
+	// }
 
 	*ppData = (amf::AMFData*)new AMFDataImpl(std::shared_ptr<amf::AMFData>(*ppData));
 

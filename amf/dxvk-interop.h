@@ -171,7 +171,6 @@ IDXGIVkInteropDevice : public IUnknown
 
     virtual void STDMETHODCALLTYPE ReleaseSubmissionQueue(
         ) = 0;
-
 };
 MIDL_INTERFACE("e2ef5fa5-dc21-4af7-90c4-f67ef6a09324")
 IDXGIVkInteropDevice2 : public IDXGIVkInteropDevice
@@ -185,6 +184,10 @@ IDXGIVkInteropDevice2 : public IDXGIVkInteropDevice
         const D3D11_TEXTURE2D_DESC1 *pDesc,
         VkImage vkImage,
         ID3D11Texture2D **ppTexture2D) = 0;
+
+    virtual void STDMETHODCALLTYPE GetSemaphores(
+        VkSemaphore* pGraphicsSemaphore,
+        VkSemaphore* pTransferSemaphore) = 0;
 };
 #ifdef __CRT_UUID_DECL
 __CRT_UUID_DECL(IDXGIVkInteropDevice, 0xe2ef5fa5, 0xdc21, 0x4af7, 0x90,0xc4, 0xf6,0x7e,0xf6,0xa0,0x93,0x23)
