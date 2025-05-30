@@ -7,19 +7,19 @@ vr::EVRInitError DeviceProvider::Init(vr::IVRDriverContext* pDriverContext) {
 	VR_INIT_SERVER_DRIVER_CONTEXT(pDriverContext);
 	vr::VRDriverLog()->Log("Hello world!");
 
-	my_left_device_ = std::make_unique<ControllerDevice>(vr::TrackedControllerRole_LeftHand);
-	if(!vr::VRServerDriverHost()->TrackedDeviceAdded("LEFTHAND_ABC123",
-		vr::TrackedDeviceClass_Controller,
-		my_left_device_.get())) {
-		return vr::VRInitError_Driver_Unknown;
-	}
+	// my_left_device_ = std::make_unique<ControllerDevice>(vr::TrackedControllerRole_LeftHand);
+	// if(!vr::VRServerDriverHost()->TrackedDeviceAdded("LEFTHAND_ABC123",
+	// 	vr::TrackedDeviceClass_Controller,
+	// 	my_left_device_.get())) {
+	// 	return vr::VRInitError_Driver_Unknown;
+	// }
 
-	my_right_device_ = std::make_unique<ControllerDevice>(vr::TrackedControllerRole_RightHand);
-	if(!vr::VRServerDriverHost()->TrackedDeviceAdded("RIGHTHAND_ABC123",
-		vr::TrackedDeviceClass_Controller,
-		my_right_device_.get())) {
-		return vr::VRInitError_Driver_Unknown;
-	}
+	// my_right_device_ = std::make_unique<ControllerDevice>(vr::TrackedControllerRole_RightHand);
+	// if(!vr::VRServerDriverHost()->TrackedDeviceAdded("RIGHTHAND_ABC123",
+	// 	vr::TrackedDeviceClass_Controller,
+	// 	my_right_device_.get())) {
+	// 	return vr::VRInitError_Driver_Unknown;
+	// }
 
 	/* hmd_device_ = std::make_unique<MyHMDControllerDeviceDriver>(); */
 	/* if(!vr::VRServerDriverHost()->TrackedDeviceAdded("mycoolhmd", */
@@ -64,9 +64,9 @@ void DeviceProvider::RunFrame() {
 	global_pipe.msg("Call RunFrame()\n");
     vr::VREvent_t vrevent;
     while (vr::VRServerDriverHost()->PollNextEvent(&vrevent, sizeof(vrevent))) {
-        my_left_device_->HandleEvent(vrevent);
-        my_right_device_->HandleEvent(vrevent);
-		hmd_device_->MyProcessEvent(vrevent);
+        // my_left_device_->HandleEvent(vrevent);
+        // my_right_device_->HandleEvent(vrevent);
+		// hmd_device_->MyProcessEvent(vrevent);
     }
 
     if (my_left_device_ != nullptr) {

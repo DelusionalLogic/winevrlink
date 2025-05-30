@@ -1100,6 +1100,80 @@ static void handler(enum PipeMethod m, void *userdata) {
 		global_pipe.send(&ret, sizeof(ret));
 		break;
 	}
+	case METH_INPUT_CSCALAR: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(size_t));
+		vr::IVRDriverInput *thisObj = ((vr::IVRDriverInput*)global_pipe.objs[thisHandle-1]);
+
+		vr::PropertyContainerHandle_t container;
+		global_pipe.recv(&container, sizeof(container));
+		size_t nameLen;
+		global_pipe.recv(&nameLen, sizeof(nameLen));
+		char *name = (char*)malloc(nameLen + 1);
+		global_pipe.recv(name, nameLen);
+		name[nameLen] = '\0';
+		vr::EVRScalarType type;
+		global_pipe.recv(&type, sizeof(type));
+		vr::EVRScalarUnits units;
+		global_pipe.recv(&units, sizeof(units));
+
+		size_t taskId = global_pipe.complete_reading_args();
+
+		vr::VRInputComponentHandle_t handle;
+		vr::EVRInputError ret = thisObj->CreateScalarComponent(container, name, &handle, type, units);
+
+		global_pipe.return_from_call(taskId);
+		global_pipe.send(&ret, sizeof(ret));
+		global_pipe.send(&handle, sizeof(handle));
+
+		free(name);
+		break;
+	}
+	case METH_INPUT_USCALAR: {
+		uint64_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(thisHandle));
+		vr::IVRDriverInput *thisObj = ((vr::IVRDriverInput*)global_pipe.objs[thisHandle-1]);
+
+		vr::VRInputComponentHandle_t handle;
+		global_pipe.recv(&handle, sizeof(handle));
+		float newValue;
+		global_pipe.recv(&newValue, sizeof(newValue));
+		double timeOffset;
+		global_pipe.recv(&timeOffset, sizeof(timeOffset));
+
+		size_t taskId = global_pipe.complete_reading_args();
+
+		vr::EVRInputError ret = thisObj->UpdateScalarComponent(handle, newValue, timeOffset);
+
+		global_pipe.return_from_call(taskId);
+		global_pipe.send(&ret, sizeof(ret));
+		break;
+	}
+	case METH_INPUT_CHAPTIC: {
+		size_t thisHandle;
+		global_pipe.recv(&thisHandle, sizeof(size_t));
+		vr::IVRDriverInput *thisObj = ((vr::IVRDriverInput*)global_pipe.objs[thisHandle-1]);
+
+		vr::PropertyContainerHandle_t container;
+		global_pipe.recv(&container, sizeof(container));
+		size_t nameLen;
+		global_pipe.recv(&nameLen, sizeof(nameLen));
+		char *name = (char*)malloc(nameLen + 1);
+		global_pipe.recv(name, nameLen);
+		name[nameLen] = '\0';
+
+		size_t taskId = global_pipe.complete_reading_args();
+
+		vr::VRInputComponentHandle_t handle;
+		vr::EVRInputError ret = thisObj->CreateHapticComponent(container, name, &handle);
+
+		global_pipe.return_from_call(taskId);
+		global_pipe.send(&ret, sizeof(ret));
+		global_pipe.send(&handle, sizeof(handle));
+
+		free(name);
+		break;
+	}
 	case METH_MB_UNDOC1: {
 		uint64_t thisHandle;
 		global_pipe.recv(&thisHandle, sizeof(thisHandle));

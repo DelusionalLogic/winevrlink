@@ -390,8 +390,8 @@ MSABI vr::EVRInputError VRDriverInput::CreateBooleanComponent( vr::PropertyConta
 	return ret;
 }
 MSABI vr::EVRInputError VRDriverInput::UpdateBooleanComponent( vr::VRInputComponentHandle_t ulComponent, bool bNewValue, double fTimeOffset ) {
-	WINE_TRACE("call UpdateBooleanComponent(%ld, %d, %lf)\n", ulComponent, bNewValue, fTimeOffset);
-	ZoneScoped;
+	// WINE_TRACE("call UpdateBooleanComponent(%ld, %d, %lf)\n", ulComponent, bNewValue, fTimeOffset);
+	// ZoneScoped;
 	state->pipe.begin_call(METH_INPUT_UBOOL);
 	state->pipe.send(&objId, sizeof(objId));
 	state->pipe.send(&ulComponent, sizeof(ulComponent));
@@ -404,20 +404,68 @@ MSABI vr::EVRInputError VRDriverInput::UpdateBooleanComponent( vr::VRInputCompon
 	state->pipe.recv(&ret, sizeof(ret));
 	state->pipe.return_read_channel();
 
-	WINE_TRACE("ret %d\n", ret);
+	// WINE_TRACE("ret %d\n", ret);
 	return ret;
 }
 MSABI vr::EVRInputError VRDriverInput::CreateScalarComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle, vr::EVRScalarType eType, vr::EVRScalarUnits eUnits ) {
-	STUB();
-	return vr::EVRInputError::VRInputError_NoData;
+	WINE_TRACE("call CreateScalarComponent(%ld, %s, %p)\n", ulContainer, pchName, pHandle);
+	ZoneScoped;
+	state->pipe.begin_call(METH_INPUT_CSCALAR);
+	state->pipe.send(&objId, sizeof(objId));
+	state->pipe.send(&ulContainer, sizeof(ulContainer));
+	size_t nameLen = strlen(pchName);
+	state->pipe.send(&nameLen, sizeof(nameLen));
+	state->pipe.send(pchName, nameLen);
+	state->pipe.send(&eType, sizeof(eType));
+	state->pipe.send(&eUnits, sizeof(eUnits));
+
+	state->pipe.wait_for_return();
+
+	vr::EVRInputError ret;
+	state->pipe.recv(&ret, sizeof(ret));
+	state->pipe.recv(pHandle, sizeof(*pHandle));
+	state->pipe.return_read_channel();
+
+	WINE_TRACE("ret %d, %ld\n", ret, *pHandle);
+	return ret;
 }
 MSABI vr::EVRInputError VRDriverInput::UpdateScalarComponent( vr::VRInputComponentHandle_t ulComponent, float fNewValue, double fTimeOffset ) {
-	STUB();
-	return vr::EVRInputError::VRInputError_NoData;
+	// WINE_TRACE("call UpdateScalarComponent(%ld, %f, %lf)\n", ulComponent, fNewValue, fTimeOffset);
+	// ZoneScoped;
+	state->pipe.begin_call(METH_INPUT_USCALAR);
+	state->pipe.send(&objId, sizeof(objId));
+	state->pipe.send(&ulComponent, sizeof(ulComponent));
+	state->pipe.send(&fNewValue, sizeof(fNewValue));
+	state->pipe.send(&fTimeOffset, sizeof(fTimeOffset));
+
+	state->pipe.wait_for_return();
+
+	vr::EVRInputError ret;
+	state->pipe.recv(&ret, sizeof(ret));
+	state->pipe.return_read_channel();
+
+	// WINE_TRACE("ret %d\n", ret);
+	return ret;
 }
 MSABI vr::EVRInputError VRDriverInput::CreateHapticComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, vr::VRInputComponentHandle_t *pHandle ) {
-	STUB();
-	return vr::EVRInputError::VRInputError_NoData;
+	WINE_TRACE("call CreateHapticComponent(%ld, %s, %p)\n", ulContainer, pchName, pHandle);
+	ZoneScoped;
+	state->pipe.begin_call(METH_INPUT_CHAPTIC);
+	state->pipe.send(&objId, sizeof(objId));
+	state->pipe.send(&ulContainer, sizeof(ulContainer));
+	size_t nameLen = strlen(pchName);
+	state->pipe.send(&nameLen, sizeof(nameLen));
+	state->pipe.send(pchName, nameLen);
+
+	state->pipe.wait_for_return();
+
+	vr::EVRInputError ret;
+	state->pipe.recv(&ret, sizeof(ret));
+	state->pipe.recv(pHandle, sizeof(*pHandle));
+	state->pipe.return_read_channel();
+
+	WINE_TRACE("ret %d, %ld\n", ret, *pHandle);
+	return ret;
 }
 MSABI vr::EVRInputError VRDriverInput::CreateSkeletonComponent( vr::PropertyContainerHandle_t ulContainer, const char *pchName, const char *pchSkeletonPath, const char *pchBasePosePath, vr::EVRSkeletalTrackingLevel eSkeletalTrackingLevel, const vr::VRBoneTransform_t *pGripLimitTransforms, uint32_t unGripLimitTransformCount, vr::VRInputComponentHandle_t *pHandle ) {
 	STUB();
