@@ -1,6 +1,7 @@
 #include "device_provider.h"
 #include "ipc.h"
 
+#include "openvr_driver.h"
 #include <cassert>
 #include <cstring>
 #include <cstdio>
@@ -8,6 +9,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "dmabuf_attributes.h"
+
+using namespace vr;
 
 #define STUB(pipe) \
 do { \

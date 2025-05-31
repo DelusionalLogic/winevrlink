@@ -10,7 +10,7 @@ unoptimized, and weird. What it does have going for it is that it works. Using
 this you can wirelessly open the SteamVR home from the official SteamVR app for
 Oculus, at a glorious 2 frames per second.
 
-As mentioned, this is a major hackjob, involving close to 200 hours of
+As mentioned, this is a major hackjob, involving close to 300 hours of
 reversing internal Steam components and quite a bit of guesswork. The
 difficulty of running the thing will reflect that. If that catches your
 interest though, it's all here.
@@ -23,17 +23,24 @@ the domain socket on startup and exchanges data with `dllhost` as a cross-wine
 RPC. Finally, `amf/` holds a shim for AMD's AMF to emulate it by using the host
 implementation and dxvk.
 
-Current limits
+Obtaining the windows driver
+----------------------------
+
+You'll need a copy of the windows vrlink driver to load into wine. Since you're
+(presumably) on linux, Steam won't download it by itself, but you can ask Steam
+to download content for different platforms. First thing you'll need to to
+locate the Steam _depot_. I usually use SteamDB for that, which tells me that
+the current depot id is [250821](https://steamdb.info/depot/250821/), but
+that'll probably change. To download that depot you open the Steam console by
+running `steam "steam://open/console/" in your terminal and run `download_depot
+250820 250821` in that console. The console will tell you where you can find
+the downloaded files.
+
+Current Issues
 --------------
 
-The linux version of vrclient (the library used by games to interface with
-openvr) doesn't _correctly_ allocate framebuffer textures. The steam vrlink
-driver doesn't like that. The problem [has been
-reported](https://github.com/ValveSoftware/openvr/issues/1884) on the openvr
-bugtracker, but it's probably not a high priority for Valve.
-
-There is stuff we can maybe do to work around it, but it would require some
-fairly intense reversing to find the texture metadata in the vrcompositor.
+- Audio isn't working.
+- Skeleton tracking is not forwarded.
 
 Getting steam to advertise support
 ----------------------------------
