@@ -70,7 +70,6 @@ enum PipeMethod : uint8_t {
 	METH_MB_UNDOC3,
 	METH_MB_UNDOC4,
 
-	METH_PROTO_TEXTURE,
 	METH_PROTO_RET,
 };
 

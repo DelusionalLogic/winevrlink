@@ -150,80 +150,6 @@ struct shared_resource_create
 };
 
 extern "C" NTSYSAPI NTSTATUS CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *unix_fd, unsigned int *options );
-extern "C" NTSYSAPI NTSTATUS CDECL wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attributes, HANDLE *handle );
-static HANDLE create_gpu_resource(int fd, int dma_fd, UINT64 resource_size)
-{
-    static const WCHAR shared_gpu_resourceW[] = {'\\','?','?','\\','S','h','a','r','e','d','G','p','u','R','e','s','o','u','r','c','e',0};
-    HANDLE unix_resource = INVALID_HANDLE_VALUE;
-    HANDLE dma_resource = INVALID_HANDLE_VALUE;
-    struct shared_resource_create *inbuff;
-    UNICODE_STRING shared_gpu_resource_us;
-    HANDLE shared_resource;
-    OBJECT_ATTRIBUTES attr;
-    IO_STATUS_BLOCK iosb;
-    NTSTATUS status;
-    DWORD in_size;
-
-    WINE_TRACE("Creating shared vulkan resource fd %d\n", fd);
-
-    if (wine_server_fd_to_handle(fd, GENERIC_ALL, 0, &unix_resource) != STATUS_SUCCESS) {
-        return INVALID_HANDLE_VALUE;
-    }
-
-    init_unicode_string(&shared_gpu_resource_us, shared_gpu_resourceW);
-
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = 0;
-    attr.Attributes = 0;
-    attr.ObjectName = &shared_gpu_resource_us;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
-
-    if((status = NtCreateFile(&shared_resource, GENERIC_READ | GENERIC_WRITE, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0))) {
-        WINE_ERR("Failed to load open a shared resource handle, status %#lx.\n", (long int)status);
-        NtClose(unix_resource);
-        NtClose(dma_resource);
-        return INVALID_HANDLE_VALUE;
-    }
-
-    in_size = sizeof(*inbuff);
-    inbuff = (struct shared_resource_create*)calloc(1, in_size);
-    inbuff->unix_handle = wine_server_obj_handle(unix_resource);
-    inbuff->dma_handle = wine_server_obj_handle(dma_resource);
-    inbuff->resource_size = resource_size;
-
-    status = NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_CREATE, inbuff, in_size, NULL, 0);
-
-    free(inbuff);
-    NtClose(unix_resource);
-    NtClose(dma_resource);
-
-    if (status)
-    {
-        WINE_ERR("Failed to create video resource, status %#lx.\n", (long int)status);
-        NtClose(shared_resource);
-        return INVALID_HANDLE_VALUE;
-    }
-
-    return shared_resource;
-}
-
-#define IOCTL_SHARED_GPU_RESOURCE_GETKMT           CTL_CODE(FILE_DEVICE_VIDEO, 2, METHOD_BUFFERED, FILE_READ_ACCESS)
-
-static HANDLE get_shared_resource_kmt_handle(HANDLE shared_resource)
-{
-    IO_STATUS_BLOCK iosb;
-    obj_handle_t kmt_handle;
-
-    if (NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_GETKMT,
-            NULL, 0, &kmt_handle, sizeof(kmt_handle)))
-        return INVALID_HANDLE_VALUE;
-
-    return wine_server_ptr_handle(kmt_handle);
-}
-
-
-extern "C" NTSYSAPI NTSTATUS CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *unix_fd, unsigned int *options );
 static int get_shared_resource_fd(HANDLE shared_resource, struct DriverState *state, uint32_t *rowPitch) {
 	IO_STATUS_BLOCK iosb;
 	uint32_t unix_resource;
@@ -1723,29 +1649,6 @@ static void cmd_handler(enum PipeMethod m, void *state_) {
 		WINE_TRACE("Frames done!\n");
 
 		state->pipe.return_from_call(taskId);
-		break;
-	}
-	case METH_PROTO_TEXTURE: {
-		ZoneScopedN("PROTO_TEXTURE");
-		int textureFd;
-		state->pipe.recv_fd(&textureFd);
-		WINE_TRACE("Import fd 0x%08x\n", textureFd);
-		assert(textureFd != 0);
-
-		struct DxvkSharedTextureMetadata textureMetadata;
-		state->pipe.recv(&textureMetadata, sizeof(textureMetadata));
-
-		size_t taskId = state->pipe.complete_reading_args();
-
-		HANDLE handle = create_gpu_resource(textureFd, 0, 0);
-		if(!setSharedMetadata(handle, &textureMetadata, sizeof(textureMetadata))) {
-			WINE_ERR("Failed to set texture metadata of %p\n", handle);
-		}
-		handle = get_shared_resource_kmt_handle(handle);
-
-		state->pipe.return_from_call(taskId);
-		state->pipe.send(&handle, sizeof(handle));
-		WINE_TRACE("Texture imported as %p\n", handle);
 		break;
 	}
 	default:

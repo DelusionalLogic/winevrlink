@@ -253,53 +253,9 @@ void VRDriverDirect::SubmitLayer( const SubmitLayerPerEye_t( &perEye )[ 2 ] ) {
 
 	vr::SharedTextureHandle_t theirRef[4] = {0};
 	for(uint8_t i = 0; i < 4; i++) {
-		TranslateToTheirs(ourRef[i], &theirRef[i]);
-	}
-
-	IVRIPCResourceManagerClient2 *resMan = (IVRIPCResourceManagerClient2*)vr::VRIPCResourceManager();
-	for(uint8_t i = 0; i < 4; i++) {
-		if(theirRef[i] == 0 && ourRef[i] != 0) {
-			uint64_t ipcHandle;
-			if(!resMan->RefResource(ourRef[i], &ipcHandle)) {
-				global_pipe.msg("RefResource Failed of %p", ourRef[i]);
-				continue;
-			}
-
-			int fd;
-			if(!resMan->ReceiveSharedFd(ipcHandle, &fd)) {
-				global_pipe.msg("RecvFd Failed of %p", ourRef[i]);
-				continue;
-			}
-
-			global_pipe.begin_call(METH_PROTO_TEXTURE);
-			global_pipe.send_fd(fd);
-			struct DxvkSharedTextureMetadata metadata = {
-				.Width = 3574,
-				.Height = 3574,
-				.MipLevels = 1,
-				.ArraySize = 1,
-				.Format = 29,
-				.SampleDesc = {
-					.Count = 1,
-					.Quality = 0,
-				},
-				.Usage = 0,
-				.CPUAccessFlags = 0,
-				.MiscFlags = 0,
-				.RowPitch = 3574,
-				.DRMFormat = 0,
-				.TextureLayout = 0,
-			};
-			global_pipe.send(&metadata, sizeof(metadata));
-			global_pipe.wait_for_return();
-			global_pipe.recv(&theirRef[i], sizeof(theirRef[i]));
-			global_pipe.return_read_channel();
-
-			assert(refs < (sizeof(ourRefs)/sizeof(ourRefs[0])));
-			ourRefs[refs] = ourRef[i];
-			theirRefs[refs] = theirRef[i];
-			global_pipe.msg("PROTO Texture %d ref %p imported %p\n", i, theirRefs[refs], ourRefs[refs]);
-			refs++;
+		if(!TranslateToTheirs(ourRef[i], &theirRef[i])) {
+			global_pipe.msg("Unknown our ref %p\n", ourRef[i]);
+			return;
 		}
 	}
 
