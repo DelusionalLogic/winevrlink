@@ -87,10 +87,14 @@ class VRDriverDirect : IVRDriverDirectModeComponent
 	uint64_t objId;
 
 	uint8_t refs = 0;
+
+	uint32_t owner[128];
 	uint64_t ourRefs[128];
 	uint64_t theirRefs[128];
 
 	bool TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs);
+	void MapTextures(vr::SharedTextureHandle_t **ours, vr::SharedTextureHandle_t **theirs, uint32_t **pids);
+	bool FindFromOurs(vr::SharedTextureHandle_t needle, size_t *i);
 public:
 	VRDriverDirect(uint64_t objId) : objId(objId) {};
 
@@ -122,8 +126,11 @@ void VRDriverDirect::CreateSwapTextureSet( uint32_t unPid, const SwapTextureSetD
 	global_pipe.msg("%d %d %d %d\n", pSwapTextureSetDesc->nWidth, pSwapTextureSetDesc->nHeight, pSwapTextureSetDesc->nFormat, pSwapTextureSetDesc->nSampleCount);
 	// I think this is in VkFormat even though the documentation states it's in DXGI_FORMAT
 	assert(pSwapTextureSetDesc->nFormat == 43);
-	// We are going to be allocating 3 textures. Make sure we have the space for that
-	assert(refs <= (sizeof(ourRefs)/sizeof(ourRefs[0])) - 3);
+
+	vr::SharedTextureHandle_t *ours;
+	vr::SharedTextureHandle_t *theirs;
+	uint32_t *pids;
+	MapTextures(&ours, &theirs, &pids);
 
 	global_pipe.begin_call(METH_DIRECT_CSWAP);
 	global_pipe.send(&this->objId, sizeof(uint64_t));
@@ -145,9 +152,9 @@ void VRDriverDirect::CreateSwapTextureSet( uint32_t unPid, const SwapTextureSetD
 	global_pipe.recv_fd(&fds[1]);
 	global_pipe.recv_fd(&fds[2]);
 	global_pipe.msg("Recv fds %d %d %d\n", fds[0], fds[1], fds[2]);
-	global_pipe.recv(&theirRefs[refs + 0], sizeof(theirRefs[refs + 0]));
-	global_pipe.recv(&theirRefs[refs + 1], sizeof(theirRefs[refs + 1]));
-	global_pipe.recv(&theirRefs[refs + 2], sizeof(theirRefs[refs + 2]));
+	global_pipe.recv(&theirs[0], sizeof(theirs[0]));
+	global_pipe.recv(&theirs[1], sizeof(theirs[1]));
+	global_pipe.recv(&theirs[2], sizeof(theirs[2]));
 	uint32_t pitches[3];
 	global_pipe.recv(&pitches[0], sizeof(pitches[0]));
 	global_pipe.recv(&pitches[1], sizeof(pitches[1]));
@@ -185,27 +192,62 @@ void VRDriverDirect::CreateSwapTextureSet( uint32_t unPid, const SwapTextureSetD
 			assert(success == 1);
 		}
 
-		ourRefs[refs + i] = sharedHandle;
+		pids[i] = unPid;
+		ours[i] = sharedHandle;
 		pOutSwapTextureSet->rSharedTextureHandles[i] = sharedHandle;
-		global_pipe.msg("Texture %d ref %p imported %p\n", i, theirRefs[refs + i], ourRefs[refs + i]);
+		global_pipe.msg("Texture %d ref %p imported %p for %d\n", i, theirs[i], ours[i], ours[i]);
 	}
 	global_pipe.msg("ret %d %p %p %p\n", pOutSwapTextureSet->unTextureFlags, pOutSwapTextureSet->rSharedTextureHandles[0], pOutSwapTextureSet->rSharedTextureHandles[1], pOutSwapTextureSet->rSharedTextureHandles[2]);
-	refs += 3;
-	assert(refs <= sizeof(ourRefs)/sizeof(ourRefs[0]));
 }
 void VRDriverDirect::DestroySwapTextureSet( vr::SharedTextureHandle_t sharedTextureHandle ) {
-	STUB(global_pipe);
+	global_pipe.msg("call DestroySwapTextureSet(%p)\n", sharedTextureHandle);
+
+
+	size_t i = 0;
+	if(!FindFromOurs(sharedTextureHandle, &i)) {
+		global_pipe.msg("Unknown our ref %p skip\n", sharedTextureHandle);
+	}
+
+	IVRIPCResourceManagerClient2 *resMan = (IVRIPCResourceManagerClient2*)vr::VRIPCResourceManager();
+	resMan->UnrefResource(theirRefs[i]);
+
+	if(i != refs-1) {
+		// We need to copy something into this slot. We don't swap since we are
+		// going to free the other slot anyway
+		theirRefs[i] = theirRefs[refs-1];
+		ourRefs[i] = ourRefs[refs-1];
+		owner[i] = owner[refs-1];
+	}
+
+	refs--;
+	global_pipe.msg("ret\n");
 }
 void VRDriverDirect::DestroyAllSwapTextureSets( uint32_t unPid ) {
 	STUB(global_pipe);
 }
 bool VRDriverDirect::TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs) {
+	size_t i = 0;
 	*theirs = 0;
-	if(ours == 0) return true;
+	if(ours == 0) return true; // our 0 explicitly maps to their 0
+	if(!FindFromOurs(ours, &i)) return false;
+	*theirs = theirRefs[i];
+	return true;
+}
+void VRDriverDirect::MapTextures(vr::SharedTextureHandle_t **ours, vr::SharedTextureHandle_t **theirs, uint32_t **pids) {
+	// Make sure we have space for 3 textures
+	assert(refs <= (sizeof(ourRefs)/sizeof(ourRefs[0])) - 3);
 
-	for(uint8_t i = 0; i < refs; i++) {
-		if(ourRefs[i] == ours) {
-			*theirs = theirRefs[i];
+	*ours = ourRefs + refs;
+	*theirs = theirRefs + refs;
+	*pids = owner + refs;
+
+	refs += 3;
+}
+bool VRDriverDirect::FindFromOurs(vr::SharedTextureHandle_t needle, size_t *index) {
+	if(needle == 0) return false;
+
+	for(; *index < refs; (*index)++) {
+		if(ourRefs[*index] == needle) {
 			return true;
 		}
 	}
@@ -222,7 +264,8 @@ void VRDriverDirect::GetNextSwapTextureSetIndex( vr::SharedTextureHandle_t share
 	for(uint8_t i = 0; i < 2; i++) {
 		if(!TranslateToTheirs(sharedTextureHandles[i], &theirRef[i])) {
 			global_pipe.msg("Unknown our ref %p skip\n", sharedTextureHandles[i]);
-			return;
+			theirRefs[i] = 0;
+			//return;
 		}
 	}
 
