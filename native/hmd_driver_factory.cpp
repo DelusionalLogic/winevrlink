@@ -88,13 +88,17 @@ class VRDriverDirect : IVRDriverDirectModeComponent
 
 	uint8_t refs = 0;
 
-	uint32_t owner[128];
-	uint64_t ourRefs[128];
-	uint64_t theirRefs[128];
+	// @PERF: This should be a real datastructure. Back when it was a couple of
+	// textures, I could justify the argument that it was probably faster to
+	// probe an array, but this is a lot of textures.
+	uint32_t owner[3*80];
+	uint64_t ourRefs[3*80];
+	uint64_t theirRefs[3*80];
 
 	bool TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs);
 	void MapTextures(vr::SharedTextureHandle_t **ours, vr::SharedTextureHandle_t **theirs, uint32_t **pids);
 	bool FindFromOurs(vr::SharedTextureHandle_t needle, size_t *i);
+	bool FindFromOwner(uint32_t needle, size_t *index);
 public:
 	VRDriverDirect(uint64_t objId) : objId(objId) {};
 
@@ -189,14 +193,15 @@ void VRDriverDirect::CreateSwapTextureSet( uint32_t unPid, const SwapTextureSetD
 		close(fds[i]);
 		if(success != 1) {
 			global_pipe.msg("Import Dmabuf failed %d\n", success);
-			assert(success == 1);
+			abort();
 		}
 
 		pids[i] = unPid;
 		ours[i] = sharedHandle;
 		pOutSwapTextureSet->rSharedTextureHandles[i] = sharedHandle;
-		global_pipe.msg("Texture %d ref %p imported %p for %d\n", i, theirs[i], ours[i], ours[i]);
+		global_pipe.msg("Texture %d ref %p imported %p for %d\n", i, theirs[i], ours[i], pids[i]);
 	}
+	global_pipe.msg("We now hold %d textures\n", refs);
 	global_pipe.msg("ret %d %p %p %p\n", pOutSwapTextureSet->unTextureFlags, pOutSwapTextureSet->rSharedTextureHandles[0], pOutSwapTextureSet->rSharedTextureHandles[1], pOutSwapTextureSet->rSharedTextureHandles[2]);
 }
 void VRDriverDirect::DestroySwapTextureSet( vr::SharedTextureHandle_t sharedTextureHandle ) {
@@ -209,7 +214,7 @@ void VRDriverDirect::DestroySwapTextureSet( vr::SharedTextureHandle_t sharedText
 	}
 
 	IVRIPCResourceManagerClient2 *resMan = (IVRIPCResourceManagerClient2*)vr::VRIPCResourceManager();
-	resMan->UnrefResource(theirRefs[i]);
+	resMan->UnrefResource(ourRefs[i]);
 
 	if(i != refs-1) {
 		// We need to copy something into this slot. We don't swap since we are
@@ -223,7 +228,26 @@ void VRDriverDirect::DestroySwapTextureSet( vr::SharedTextureHandle_t sharedText
 	global_pipe.msg("ret\n");
 }
 void VRDriverDirect::DestroyAllSwapTextureSets( uint32_t unPid ) {
-	STUB(global_pipe);
+	global_pipe.msg("call DestroyAllSwapTextureSets(%d)\n", unPid);
+
+	IVRIPCResourceManagerClient2 *resMan = (IVRIPCResourceManagerClient2*)vr::VRIPCResourceManager();
+	size_t dst = 0;
+	for(size_t i = 0; i < refs; i++) {
+		if(owner[i] == unPid) {
+			resMan->UnrefResource(ourRefs[i]);
+			continue;
+		}
+
+		owner[dst] = owner[i];
+		ourRefs[dst] = ourRefs[i];
+		theirRefs[dst] = theirRefs[i];
+		dst++;
+	}
+	global_pipe.msg("Destroyed %d textures\n", refs - dst);
+
+	refs = dst;
+
+	global_pipe.msg("ret\n");
 }
 bool VRDriverDirect::TranslateToTheirs(vr::SharedTextureHandle_t ours, vr::SharedTextureHandle_t *theirs) {
 	size_t i = 0;
